@@ -6,6 +6,18 @@ function normalizeNameKey_(s) {
   return String(s || '').trim().replace(/[ 　\t]/g, '');
 }
 
+/**
+ * 氏名から名字を抽出（スペースの前の部分）
+ * @param {string} fullName - フルネーム（例：「森永 英敬」）
+ * @returns {string} 名字（例：「森永」）
+ */
+function extractLastName_(fullName) {
+  const name = String(fullName || '').trim();
+  // 半角スペース、全角スペース、タブで分割
+  const parts = name.split(/[ 　\t]/);
+  return parts[0] || name; // スペースがない場合はそのまま返す
+}
+
 function extractNamedValues_(e) {
   const out = {};
   const named = (e && e.namedValues) ? e.namedValues : {};

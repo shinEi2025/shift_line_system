@@ -1,0 +1,12 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "clasp watch",
+      "type": "shell",
+      "command": "/Users/morinagahidetaka/.npm-global/bin/clasp push --watch",
+      "isBackground": true,
+      "problemMatcher": []
+    }
+  ]
+}

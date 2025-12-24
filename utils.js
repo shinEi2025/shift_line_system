@@ -31,6 +31,27 @@ function extractSpreadsheetId_(url) {
 }
 
 /**
+ * メールアドレスを抽出（テキストから）
+ * @param {string} text - テキスト
+ * @returns {string} メールアドレス（見つからない場合は空文字列）
+ */
+function extractEmail_(text) {
+  const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/;
+  const match = String(text || '').match(emailRegex);
+  return match ? match[0] : '';
+}
+
+/**
+ * メールアドレスの形式を検証
+ * @param {string} email - メールアドレス
+ * @returns {boolean} 有効な形式かどうか
+ */
+function isValidEmail_(email) {
+  const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+  return emailRegex.test(String(email || '').trim());
+}
+
+/**
  * Teachersの氏名で講師を探す（完全一致）
  * 必須: 氏名 / lineUserId
  * 任意: teacherId / メール
@@ -66,7 +87,7 @@ function findTeacherByName_(masterSs, teacherNameRaw) {
     }
   }
   if (hits.length !== 1) return null;
-  return hits[0];
+  return hits[0]; // row, name, lineUserId, teacherId, email を含む
 }
 
 /**
@@ -89,6 +110,7 @@ function linkLineUserByName_(masterSs, nameKey, userId) {
   const idxName = header.indexOf('氏名');
   const idxLine = header.indexOf('lineUserId');
   const idxLinkedAt = header.indexOf('lineLinkedAt');
+  const idxEmail = header.indexOf('メール');
 
   if (idxName < 0) throw new Error('Teachersに「氏名」列がありません');
   if (idxLine < 0) throw new Error('Teachersに「lineUserId」列がありません（ヘッダー追加してください）');
@@ -101,6 +123,7 @@ function linkLineUserByName_(masterSs, nameKey, userId) {
         row: r + 1,
         name: String(values[r][idxName]).trim(),
         currentLineId: String(values[r][idxLine] || '').trim(),
+        currentEmail: idxEmail >= 0 ? String(values[r][idxEmail] || '').trim() : '',
       });
     }
   }
@@ -112,22 +135,44 @@ function linkLineUserByName_(masterSs, nameKey, userId) {
 
   // ★すでに同じLINE userIdが入っている → 何もしない（=二重返信防止）
   if (target.currentLineId === userId) {
-    return { status: 'already_linked_same', name: target.name };
+    return { status: 'already_linked_same', name: target.name, email: target.currentEmail };
   }
 
   // ★別のuserIdが入っている → 上書き禁止（事故防止）
   if (target.currentLineId && target.currentLineId !== userId) {
-    return { status: 'already_linked_other', name: target.name };
+    return { status: 'already_linked_other', name: target.name, email: target.currentEmail };
   }
 
   // ★新規紐付け
   sh.getRange(target.row, idxLine + 1).setValue(userId);
   if (idxLinkedAt >= 0) sh.getRange(target.row, idxLinkedAt + 1).setValue(new Date());
 
-  return { status: 'linked', name: target.name };
+  return { status: 'linked', name: target.name, email: target.currentEmail, row: target.row };
 }
 
+/**
+ * Teachersシートのメールアドレスを更新
+ * @param {SpreadsheetApp.Spreadsheet} masterSs - マスタースプレッドシート
+ * @param {number} row - 行番号（1ベース）
+ * @param {string} email - メールアドレス
+ * @returns {boolean} 更新成功かどうか
+ */
+function updateTeacherEmail_(masterSs, row, email) {
+  try {
+    const sh = masterSs.getSheetByName(CONFIG.SHEET_TEACHERS);
+    if (!sh) return false;
 
+    const header = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+    const idxEmail = header.indexOf('メール');
+    if (idxEmail < 0) return false;
+
+    sh.getRange(row, idxEmail + 1).setValue(email);
+    return true;
+  } catch (e) {
+    console.error('updateTeacherEmail_ error:', e);
+    return false;
+  }
+}
 
 /** Submissionsに1行追加（ヘッダー名ベース） */
 function appendSubmission_(masterSs, obj) {
@@ -326,4 +371,3 @@ function handleError_(error, functionName, context = {}) {
   logError_(error, functionName, context);
   notifyAdminOnError_(error, functionName, context);
 }
-

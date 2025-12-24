@@ -69,28 +69,136 @@ function doPost(e) {
         // コマンドとして認識されなかった場合は通常の名前検索に進む（管理者も登録可能にするため）
       }
 
-      const nameKey = normalizeNameKey_(textRaw);
+      // メールアドレス更新の確認応答を処理
+      const props = PropertiesService.getScriptProperties();
+      const emailUpdateKey = `EMAIL_UPDATE_${userId}`;
+      const emailUpdateData = props.getProperty(emailUpdateKey);
+      if (emailUpdateData) {
+        try {
+          const updateInfo = JSON.parse(emailUpdateData);
+          const responseText = textRaw.toLowerCase().trim();
+          
+          // 24時間以内の確認のみ有効
+          const now = new Date().getTime();
+          if (now - updateInfo.timestamp > 24 * 60 * 60 * 1000) {
+            props.deleteProperty(emailUpdateKey);
+          } else if (responseText === 'はい' || responseText === 'yes' || responseText === 'y') {
+            // メールアドレスを更新
+            const teacher = findTeacherByName_(master, updateInfo.name);
+            if (teacher) {
+              updateTeacherEmail_(master, teacher.row, updateInfo.newEmail);
+              replyLine_(replyToken, `メールアドレスを変更しました：${updateInfo.newEmail}`);
+            } else {
+              replyLine_(replyToken, `エラー：講師情報が見つかりませんでした。`);
+            }
+            props.deleteProperty(emailUpdateKey);
+            continue;
+          } else if (responseText === 'いいえ' || responseText === 'no' || responseText === 'n') {
+            replyLine_(replyToken, `メールアドレスの変更をキャンセルしました。`);
+            props.deleteProperty(emailUpdateKey);
+            continue;
+          } else {
+            // 確認待ち状態を維持（「はい」「いいえ」以外のメッセージ）
+            replyLine_(replyToken, `メールアドレスの変更を続けますか？\n「はい」または「いいえ」と送信してください。`);
+            continue;
+          }
+        } catch (e) {
+          console.error('Email update confirmation error:', e);
+          props.deleteProperty(emailUpdateKey);
+        }
+      }
+
+      // メールアドレスが含まれているかチェック
+      const extractedEmail = extractEmail_(textRaw);
+      const textWithoutEmail = textRaw.replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/, '').trim();
+      
+      // 氏名を抽出（メールアドレスを除いた部分）
+      const nameKey = normalizeNameKey_(textWithoutEmail || textRaw);
       const result = linkLineUserByName_(master, nameKey, userId);
 
-      if (result.status === 'linked') {
-        replyLine_(replyToken, `登録OK：${result.name} さん\n今後はこのLINEでシフト連絡します。`);
-      } else if (result.status === 'already_linked_same') {
-        // ★二重返信を止める：何も返さない（静かに無視）
-        // replyLine_(replyToken, 'すでに登録済みです。'); ←返したいならこれ
-      } else if (result.status === 'already_linked_other') {
-        replyLine_(replyToken, `この氏名は別のLINEと紐付いています：${result.name}\n教室まで連絡してください。`);
-      } else if (result.status === 'multiple') {
+      if (result.status === 'not_found') {
+        replyLine_(replyToken, `まだ登録がありません。\n名簿（Teachers）に一致する氏名が見つかりませんでした：\n「${textRaw}」`);
+        continue;
+      }
+
+      if (result.status === 'multiple') {
         replyLine_(
           replyToken,
           `同じ氏名が複数います（候補：${result.candidates.join(' / ')}）\n` +
           `フルネームをそのまま送ってください（空白は気にしなくてOK）。`
         );
-      } else {
-        replyLine_(
-          replyToken,
-          `名簿（Teachers）に一致する氏名が見つかりませんでした：\n「${textRaw}」\n` +
-          `Teachersの氏名表記と一致するように送ってください（空白は気にしなくてOK）。`
-        );
+        continue;
+      }
+
+      if (result.status === 'already_linked_other') {
+        replyLine_(replyToken, `この氏名は別のLINEと紐付いています：${result.name}\n教室まで連絡してください。`);
+        continue;
+      }
+
+      if (result.status === 'already_linked_same') {
+        // 既に登録済みの場合、メールアドレスの処理
+        if (extractedEmail && isValidEmail_(extractedEmail)) {
+          const currentEmail = result.email || '';
+          if (currentEmail && currentEmail !== extractedEmail) {
+            // メールアドレスが違う場合、確認を求める
+            // 確認待ち状態を保存（簡易版：次回のメッセージで「はい」が来たら更新）
+            const props = PropertiesService.getScriptProperties();
+            props.setProperty(`EMAIL_UPDATE_${userId}`, JSON.stringify({
+              name: result.name,
+              oldEmail: currentEmail,
+              newEmail: extractedEmail,
+              timestamp: new Date().getTime()
+            }));
+            replyLine_(
+              replyToken,
+              `登録されているメールアドレスと違います。\n現在: ${currentEmail}\n送信: ${extractedEmail}\n\n変更しますか？「はい」または「いいえ」と送信してください。`
+            );
+            continue;
+          } else if (!currentEmail) {
+            // メールアドレスが登録されていない場合、登録
+            const teacher = findTeacherByName_(master, result.name);
+            if (teacher) {
+              updateTeacherEmail_(master, teacher.row, extractedEmail);
+              replyLine_(replyToken, `メールアドレスを登録しました：${extractedEmail}`);
+            }
+            continue;
+          }
+        }
+        // ★二重返信を止める：何も返さない（静かに無視）
+        continue;
+      }
+
+      if (result.status === 'linked') {
+        // 新規登録の場合
+        let message = `登録OK：${result.name} さん\n今後はこのLINEでシフト連絡します。`;
+        
+        // メールアドレスの処理
+        if (extractedEmail && isValidEmail_(extractedEmail)) {
+          const currentEmail = result.email || '';
+          if (currentEmail && currentEmail !== extractedEmail) {
+            // メールアドレスが違う場合、確認を求める
+            const props = PropertiesService.getScriptProperties();
+            props.setProperty(`EMAIL_UPDATE_${userId}`, JSON.stringify({
+              name: result.name,
+              oldEmail: currentEmail,
+              newEmail: extractedEmail,
+              timestamp: new Date().getTime()
+            }));
+            message += `\n\n登録されているメールアドレスと違います。\n現在: ${currentEmail}\n送信: ${extractedEmail}\n\n変更しますか？「はい」または「いいえ」と送信してください。`;
+          } else if (!currentEmail) {
+            // メールアドレスが登録されていない場合、登録
+            if (result.row) {
+              updateTeacherEmail_(master, result.row, extractedEmail);
+              message += `\n\nメールアドレスを登録しました：${extractedEmail}`;
+            }
+          }
+        } else if (!result.email) {
+          // メールアドレスが登録されていない場合、促す
+          message += `\n\nメールアドレスが登録されていません。\n「${result.name} メールアドレス」の形式で送信してください。`;
+        }
+        
+        replyLine_(replyToken, message);
+        continue;
       }
 
     }

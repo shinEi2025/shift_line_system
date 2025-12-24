@@ -181,6 +181,18 @@ function onFormSubmit(e) {
       TEACHER_NAME: teacherName,
     });
 
+    // 講師名をG3に直接設定（シートを開いた時にすぐ表示されるように）
+    try {
+      const teacherSs = SpreadsheetApp.openById(newSpreadsheetId);
+      const inputSheet = teacherSs.getSheetByName('Input');
+      if (inputSheet) {
+        inputSheet.getRange('G3').setValue(teacherName);
+      }
+    } catch (e) {
+      // G3の設定に失敗しても続行（onOpen()で後から設定される）
+      console.error('Failed to set teacher name in G3:', e);
+    }
+
     // LINEにURL送信（登録済みのみ）
     if (lineUserId) {
       pushLine_(lineUserId,
@@ -624,6 +636,7 @@ function ensurePanel_() {
 
 /**
  * _METAシートから講師名を取得して表示
+ * シートを開いた時に必ず講師名がG3に表示されるようにする
  */
 function setTeacherNameFromMeta_() {
   try {
@@ -635,8 +648,14 @@ function setTeacherNameFromMeta_() {
     if (!sh) return;
 
     const cell = sh.getRange(SUBMIT_CONFIG.TEACHER_NAME_CELL_A1);
-    if (String(cell.getValue() || '').trim() !== name) cell.setValue(name);
-  } catch (e) {}
+    const currentValue = String(cell.getValue() || '').trim();
+    // 現在の値が空、または異なる場合は更新
+    if (!currentValue || currentValue !== name) {
+      cell.setValue(name);
+    }
+  } catch (e) {
+    console.error('setTeacherNameFromMeta_ error:', e);
+  }
 }
 
 /**

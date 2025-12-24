@@ -313,12 +313,20 @@ function handleAdminUnlockLatest_(masterSs) {
  */
 function handleAdminUnlockCommand_(masterSs, command) {
   try {
-    // コマンド形式: "変更依頼: 講師名 月" または "変更依頼: 講師名" または "変更依頼:講師名"
-    // コロンの前後でスペースの有無を柔軟に対応
-    // パターン: 変更依頼 + コロン（全角/半角） + スペース（任意） + 講師名 + スペース（任意） + 月（任意）
-    // より柔軟なマッチング: 講師名の後に月が来る場合と来ない場合を区別
+    // コマンド形式: 
+    // - "変更依頼: 講師名 月" または "変更依頼: 講師名" または "変更依頼:講師名"
+    // - "変更依頼 講師名 月" または "変更依頼 講師名"（コロンなし、スペースのみ）
+    // コロンの有無、スペースの有無を柔軟に対応
     const trimmedCommand = command.trim();
-    const match = trimmedCommand.match(/^変更依頼[：:]\s*(.+?)(?:\s+(\d{4}-\d{2}))?\s*$/);
+    
+    // パターン1: コロンあり（全角/半角）
+    let match = trimmedCommand.match(/^変更依頼[：:]\s*(.+?)(?:\s+(\d{4}-\d{2}))?\s*$/);
+    
+    // パターン2: コロンなし、スペースで始まる
+    if (!match) {
+      match = trimmedCommand.match(/^変更依頼\s+(.+?)(?:\s+(\d{4}-\d{2}))?\s*$/);
+    }
+    
     if (!match || !match[1]) {
       return { handled: false, message: '' };
     }

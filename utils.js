@@ -145,14 +145,14 @@ function linkLineUserByName_(masterSs, nameKey, userId) {
 
   const target = hits[0];
 
-  // ★すでに同じLINE userIdが入っている → 何もしない（=二重返信防止）
+  // ★すでに同じLINE userIdが入っている → 完全一致
   if (target.currentLineId === userId) {
-    return { status: 'already_linked_same', name: target.name, email: target.currentEmail };
+    return { status: 'already_linked_same', name: target.name, email: target.currentEmail, row: target.row };
   }
 
-  // ★別のuserIdが入っている → 上書き禁止（事故防止）
+  // ★別のuserIdが入っている → LINE IDが変更された可能性
   if (target.currentLineId && target.currentLineId !== userId) {
-    return { status: 'already_linked_other', name: target.name, email: target.currentEmail };
+    return { status: 'already_linked_other', name: target.name, email: target.currentEmail, row: target.row, oldLineId: target.currentLineId };
   }
 
   // ★新規紐付け

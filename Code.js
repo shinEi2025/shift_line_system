@@ -131,17 +131,50 @@ function doPost(e) {
       }
 
       if (result.status === 'already_linked_other') {
+        // 別のLINE IDが登録されている場合
+        const currentEmail = result.email || '';
+        const lastName = extractLastName_(result.name);
+        
+        // メールアドレスが含まれている場合、メールアドレスで確認
+        if (extractedEmail && isValidEmail_(extractedEmail)) {
+          if (currentEmail && currentEmail === extractedEmail) {
+            // メールアドレスが一致 → LINE IDを更新（アカウント変更の可能性）
+            const sh = master.getSheetByName(CONFIG.SHEET_TEACHERS);
+            const header = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+            const idxLine = header.indexOf('lineUserId');
+            const idxLinkedAt = header.indexOf('lineLinkedAt');
+            
+            if (idxLine >= 0 && result.row) {
+              sh.getRange(result.row, idxLine + 1).setValue(userId);
+              if (idxLinkedAt >= 0) sh.getRange(result.row, idxLinkedAt + 1).setValue(new Date());
+              
+              replyLine_(
+                replyToken,
+                `新しいシステムが導入されました。\nアカウントを変更しましたか？再登録しました：${lastName}先生`
+              );
+              continue;
+            }
+          }
+        }
+        
+        // メールアドレスが一致しない、または含まれていない場合
         replyLine_(replyToken, `この氏名は別のLINEと紐付いています：${result.name}\n教室まで連絡してください。`);
         continue;
       }
 
       if (result.status === 'already_linked_same') {
-        // 既に登録済みの場合、メールアドレスの処理
+        // 既に登録済みの場合、完全一致チェック
+        const currentEmail = result.email || '';
+        
+        // メールアドレスが含まれている場合
         if (extractedEmail && isValidEmail_(extractedEmail)) {
-          const currentEmail = result.email || '';
-          if (currentEmail && currentEmail !== extractedEmail) {
+          if (currentEmail && currentEmail === extractedEmail) {
+            // LINE IDもメールアドレスも完全一致 → 既に登録済み
+            const lastName = extractLastName_(result.name);
+            replyLine_(replyToken, `既に登録済みです：${lastName}先生`);
+            continue;
+          } else if (currentEmail && currentEmail !== extractedEmail) {
             // メールアドレスが違う場合、確認を求める
-            // 確認待ち状態を保存（簡易版：次回のメッセージで「はい」が来たら更新）
             const props = PropertiesService.getScriptProperties();
             props.setProperty(`EMAIL_UPDATE_${userId}`, JSON.stringify({
               name: result.name,
@@ -156,27 +189,34 @@ function doPost(e) {
             continue;
           } else if (!currentEmail) {
             // メールアドレスが登録されていない場合、登録
-            const teacher = findTeacherByName_(master, result.name);
-            if (teacher) {
-              updateTeacherEmail_(master, teacher.row, extractedEmail);
+            if (result.row) {
+              updateTeacherEmail_(master, result.row, extractedEmail);
               replyLine_(replyToken, `メールアドレスを登録しました：${extractedEmail}`);
             }
             continue;
           }
+        } else {
+          // メールアドレスが含まれていない場合、既に登録済みと返す
+          const lastName = extractLastName_(result.name);
+          replyLine_(replyToken, `既に登録済みです：${lastName}先生`);
+          continue;
         }
-        // ★二重返信を止める：何も返さない（静かに無視）
+        // フォールバック：何も返さない（静かに無視）
         continue;
       }
 
       if (result.status === 'linked') {
         // 新規登録の場合
         const lastName = extractLastName_(result.name);
-        let message = `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。`;
+        const currentEmail = result.email || '';
         
-        // メールアドレスの処理
+        // メールアドレスが含まれている場合
         if (extractedEmail && isValidEmail_(extractedEmail)) {
-          const currentEmail = result.email || '';
-          if (currentEmail && currentEmail !== extractedEmail) {
+          if (currentEmail && currentEmail === extractedEmail) {
+            // メールアドレスが既に登録済み → 既に登録済みと返す
+            replyLine_(replyToken, `既に登録済みです：${lastName}先生`);
+            continue;
+          } else if (currentEmail && currentEmail !== extractedEmail) {
             // メールアドレスが違う場合、確認を求める
             const props = PropertiesService.getScriptProperties();
             props.setProperty(`EMAIL_UPDATE_${userId}`, JSON.stringify({
@@ -185,20 +225,29 @@ function doPost(e) {
               newEmail: extractedEmail,
               timestamp: new Date().getTime()
             }));
-            message += `\n\n登録されているメールアドレスと違います。\n現在: ${currentEmail}\n送信: ${extractedEmail}\n\n変更しますか？「はい」または「いいえ」と送信してください。`;
+            replyLine_(
+              replyToken,
+              `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。\n\n登録されているメールアドレスと違います。\n現在: ${currentEmail}\n送信: ${extractedEmail}\n\n変更しますか？「はい」または「いいえ」と送信してください。`
+            );
+            continue;
           } else if (!currentEmail) {
             // メールアドレスが登録されていない場合、登録
             if (result.row) {
               updateTeacherEmail_(master, result.row, extractedEmail);
-              message += `\n\nメールアドレスを登録しました：${extractedEmail}`;
+              replyLine_(replyToken, `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。\n\nメールアドレスを登録しました：${extractedEmail}`);
+            } else {
+              replyLine_(replyToken, `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。`);
             }
+            continue;
           }
-        } else if (!result.email) {
-          // メールアドレスが登録されていない場合、促す
-          const lastName = extractLastName_(result.name);
-          message += `\n\n${lastName}先生、メールアドレスが登録されていません。\n「${result.name} メールアドレス」の形式で送信してください。`;
         }
         
+        // メールアドレスが含まれていない場合
+        let message = `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。`;
+        if (!currentEmail) {
+          // メールアドレスが登録されていない場合、促す
+          message += `\n\n${lastName}先生、メールアドレスが登録されていません。\n「${result.name} メールアドレス」の形式で送信してください。`;
+        }
         replyLine_(replyToken, message);
         continue;
       }

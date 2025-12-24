@@ -60,12 +60,13 @@ function doPost(e) {
 
       // 管理者からのロック解除コマンドを処理
       if (adminLineUserId && userId === adminLineUserId) {
-        // コマンド形式: "変更依頼: 講師名 月" または "変更依頼: 講師名"
+        // コマンド形式: "変更依頼: 講師名 月" または "変更依頼: 講師名" または "変更依頼:講師名"
         const unlockResult = handleAdminUnlockCommand_(master, textRaw);
         if (unlockResult.handled) {
           replyLine_(replyToken, unlockResult.message);
           continue;
         }
+        // コマンドとして認識されなかった場合は通常の名前検索に進む（管理者も登録可能にするため）
       }
 
       const nameKey = normalizeNameKey_(textRaw);
@@ -300,13 +301,25 @@ function handleAdminUnlockLatest_(masterSs) {
  */
 function handleAdminUnlockCommand_(masterSs, command) {
   try {
-    // コマンド形式: "変更依頼: 講師名 月" または "変更依頼: 講師名"
-    const match = command.match(/変更依頼[：:]\s*(.+?)(?:\s+(\d{4}-\d{2}))?$/);
-    if (!match) {
+    // コマンド形式: "変更依頼: 講師名 月" または "変更依頼: 講師名" または "変更依頼:講師名"
+    // コロンの前後でスペースの有無を柔軟に対応
+    // パターン: 変更依頼 + コロン（全角/半角） + スペース（任意） + 講師名 + スペース（任意） + 月（任意）
+    // より柔軟なマッチング: 講師名の後に月が来る場合と来ない場合を区別
+    const trimmedCommand = command.trim();
+    const match = trimmedCommand.match(/^変更依頼[：:]\s*(.+?)(?:\s+(\d{4}-\d{2}))?\s*$/);
+    if (!match || !match[1]) {
       return { handled: false, message: '' };
     }
 
-    const teacherNameRaw = match[1].trim();
+    let teacherNameRaw = match[1].trim();
+    // 月の形式（YYYY-MM）が講師名に含まれている場合は除外
+    if (teacherNameRaw.match(/^\d{4}-\d{2}$/)) {
+      return { handled: false, message: '' };
+    }
+    
+    if (!teacherNameRaw) {
+      return { handled: false, message: '' };
+    }
     const monthKey = match[2] ? match[2].trim() : '';
 
     // Submissionsから該当する提出を検索

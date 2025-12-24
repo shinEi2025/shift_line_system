@@ -55,7 +55,19 @@ function pollSubmissionsAndUpdate() {
 
     const teacherId = idxTeacherId >= 0 ? String(values[r][idxTeacherId] || '').trim() : '';
     const teacherName = idxName >= 0 ? String(values[r][idxName] || '').trim() : '';
-    const monthKey = idxMonthKey >= 0 ? String(values[r][idxMonthKey] || '').trim() : '';
+    // monthKeyを適切にフォーマット（Dateオブジェクトの場合は文字列に変換）
+    let monthKey = '';
+    if (idxMonthKey >= 0) {
+      const monthKeyValue = values[r][idxMonthKey];
+      if (monthKeyValue instanceof Date) {
+        // Dateオブジェクトの場合は YYYY-MM 形式に変換
+        const year = monthKeyValue.getFullYear();
+        const month = String(monthKeyValue.getMonth() + 1).padStart(2, '0');
+        monthKey = `${year}-${month}`;
+      } else {
+        monthKey = String(monthKeyValue || '').trim();
+      }
+    }
 
     // ② 講師シートの表示も更新（任意：B2を提出済に）
     let teacherEmail = '';

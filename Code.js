@@ -170,7 +170,7 @@ function doPost(e) {
 
       if (result.status === 'linked') {
         // 新規登録の場合
-        let message = `登録OK：${result.name} さん\n今後はこのLINEでシフト連絡します。`;
+        let message = `登録OK：${result.name}先生\n今後はこのLINEでシフト連絡します。`;
         
         // メールアドレスの処理
         if (extractedEmail && isValidEmail_(extractedEmail)) {
@@ -194,7 +194,7 @@ function doPost(e) {
           }
         } else if (!result.email) {
           // メールアドレスが登録されていない場合、促す
-          message += `\n\nメールアドレスが登録されていません。\n「${result.name} メールアドレス」の形式で送信してください。`;
+          message += `\n\n${result.name}先生、メールアドレスが登録されていません。\n「${result.name} メールアドレス」の形式で送信してください。`;
         }
         
         replyLine_(replyToken, message);
@@ -388,13 +388,13 @@ function handleAdminUnlockLatest_(masterSs) {
 
     // メールアドレスがない場合は警告
     if (!teacherEmail) {
-      return { handled: true, message: `ロック解除に失敗しました：講師「${targetTeacherName}」のメールアドレスが登録されていません。Teachersシートにメールアドレスを追加してください。` };
+      return { handled: true, message: `ロック解除に失敗しました：${targetTeacherName}先生のメールアドレスが登録されていません。Teachersシートにメールアドレスを追加してください。` };
     }
 
     // ロック解除
     const unlocked = unlockTeacherSheet_(spreadsheetId, teacherEmail);
     if (!unlocked) {
-      return { handled: true, message: `ロック解除に失敗しました：${targetTeacherName}さん（${targetMonthKey}）\nシートID: ${spreadsheetId}\nメール: ${teacherEmail}\n詳細はログを確認してください。` };
+      return { handled: true, message: `ロック解除に失敗しました：${targetTeacherName}先生（${targetMonthKey}）\nシートID: ${spreadsheetId}\nメール: ${teacherEmail}\n詳細はログを確認してください。` };
     }
 
     // SubmissionsのlockedAtをクリア
@@ -405,11 +405,11 @@ function handleAdminUnlockLatest_(masterSs) {
     // 講師にLINE通知
     if (lineUserId) {
       pushLine_(lineUserId,
-        `【シフト変更依頼】\n${targetTeacherName}さん（${targetMonthKey}）のシフトを変更していただくようお願いします。\nシートの編集が可能になりました。\n${targetUrl}`
+        `【シフト変更依頼】\n${targetTeacherName}先生（${targetMonthKey}）のシフトを変更していただくようお願いします。\nシートの編集が可能になりました。\n${targetUrl}`
       );
     }
 
-    return { handled: true, message: `ロック解除しました：${targetTeacherName}さん（${targetMonthKey}）` };
+      return { handled: true, message: `ロック解除しました：${targetTeacherName}先生（${targetMonthKey}）` };
 
   } catch (err) {
     handleError_(err, 'handleAdminUnlockLatest_');
@@ -537,13 +537,13 @@ function handleAdminUnlockCommand_(masterSs, command) {
 
     // メールアドレスがない場合は警告
     if (!teacherEmail) {
-      return { handled: true, message: `ロック解除に失敗しました：講師「${targetTeacherName}」のメールアドレスが登録されていません。Teachersシートにメールアドレスを追加してください。` };
+      return { handled: true, message: `ロック解除に失敗しました：${targetTeacherName}先生のメールアドレスが登録されていません。Teachersシートにメールアドレスを追加してください。` };
     }
 
     // ロック解除
     const unlocked = unlockTeacherSheet_(spreadsheetId, teacherEmail);
     if (!unlocked) {
-      return { handled: true, message: `ロック解除に失敗しました：${targetTeacherName}さん（${targetMonthKey}）\nシートID: ${spreadsheetId}\nメール: ${teacherEmail}\n詳細はログを確認してください。` };
+      return { handled: true, message: `ロック解除に失敗しました：${targetTeacherName}先生（${targetMonthKey}）\nシートID: ${spreadsheetId}\nメール: ${teacherEmail}\n詳細はログを確認してください。` };
     }
 
     // SubmissionsのlockedAtをクリア
@@ -554,11 +554,11 @@ function handleAdminUnlockCommand_(masterSs, command) {
     // 講師にLINE通知
     if (lineUserId) {
       pushLine_(lineUserId,
-        `【シフト変更依頼】\n${targetTeacherName}さん（${targetMonthKey}）のシフトを変更していただくようお願いします。\nシートの編集が可能になりました。\n${targetUrl}`
+        `【シフト変更依頼】\n${targetTeacherName}先生（${targetMonthKey}）のシフトを変更していただくようお願いします。\nシートの編集が可能になりました。\n${targetUrl}`
       );
     }
 
-    return { handled: true, message: `ロック解除しました：${targetTeacherName}さん（${targetMonthKey}）` };
+      return { handled: true, message: `ロック解除しました：${targetTeacherName}先生（${targetMonthKey}）` };
 
   } catch (err) {
     handleError_(err, 'handleAdminUnlockCommand_', { command });

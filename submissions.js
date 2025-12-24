@@ -96,7 +96,7 @@ function pollSubmissionsAndUpdate() {
 
     const lineUserId = getTeacherLineUserId_(master, teacherId, teacherName);
     if (lineUserId) {
-      pushLine_(lineUserId, `【提出受理】\n${teacherName}さん（${monthKey}）のシフト提出を受け付けました。ありがとうございます！`);
+      pushLine_(lineUserId, `【提出受理】\n${teacherName}先生（${monthKey}）のシフト提出を受け付けました。ありがとうございます！`);
       sh.getRange(r + 1, idxAck + 1).setValue(new Date());
     }
   }
@@ -173,7 +173,7 @@ function remindUnsubmitted() {
     if (!lineUserId) continue;
 
     pushLine_(lineUserId,
-      `【シフト未提出リマインド】\n${teacherName}さん（${targetMonth}）の提出がまだのようです。\nこちらから入力・提出（☑）をお願いします。\n${url}`
+      `【シフト未提出リマインド】\n${teacherName}先生（${targetMonth}）の提出がまだのようです。\nこちらから入力・提出（☑）をお願いします。\n${url}`
     );
 
     sh.getRange(r + 1, idxReminder + 1).setValue(new Date());

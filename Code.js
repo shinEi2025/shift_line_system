@@ -278,10 +278,15 @@ function handleAdminUnlockLatest_(masterSs) {
     const teacherEmail = teacher ? teacher.email || '' : '';
     const lineUserId = teacher ? teacher.lineUserId || '' : '';
 
+    // メールアドレスがない場合は警告
+    if (!teacherEmail) {
+      return { handled: true, message: `ロック解除に失敗しました：講師「${targetTeacherName}」のメールアドレスが登録されていません。Teachersシートにメールアドレスを追加してください。` };
+    }
+
     // ロック解除
     const unlocked = unlockTeacherSheet_(spreadsheetId, teacherEmail);
     if (!unlocked) {
-      return { handled: true, message: 'ロック解除に失敗しました' };
+      return { handled: true, message: `ロック解除に失敗しました：${targetTeacherName}さん（${targetMonthKey}）\nシートID: ${spreadsheetId}\nメール: ${teacherEmail}\n詳細はログを確認してください。` };
     }
 
     // SubmissionsのlockedAtをクリア
@@ -391,7 +396,20 @@ function handleAdminUnlockCommand_(masterSs, command) {
     }
 
     if (targetRow < 0) {
-      return { handled: true, message: `提出済みのデータが見つかりません：${teacherNameRaw}${monthKey ? ' ' + monthKey : ''}` };
+      // より詳細なエラーメッセージ：提出済みでない可能性も考慮
+      let statusInfo = '';
+      for (let r = 1; r < values.length; r++) {
+        const name = String(values[r][idxName] || '').trim();
+        const mk = idxMonthKey >= 0 ? String(values[r][idxMonthKey] || '').trim() : '';
+        const status = String(values[r][idxStatus] || '').trim();
+        const nameMatch = normalizeNameKey_(name) === normalizeNameKey_(teacherNameRaw);
+        const monthMatch = !monthKey || mk === monthKey;
+        if (nameMatch && monthMatch) {
+          statusInfo = `（状態: ${status}）`;
+          break;
+        }
+      }
+      return { handled: true, message: `提出済みのデータが見つかりません：${teacherNameRaw}${monthKey ? ' ' + monthKey : ''}${statusInfo}\n提出済み（status='submitted'）のデータが必要です。` };
     }
 
     if (!targetUrl) {
@@ -409,10 +427,15 @@ function handleAdminUnlockCommand_(masterSs, command) {
     const teacherEmail = teacher ? teacher.email || '' : '';
     const lineUserId = teacher ? teacher.lineUserId || '' : '';
 
+    // メールアドレスがない場合は警告
+    if (!teacherEmail) {
+      return { handled: true, message: `ロック解除に失敗しました：講師「${targetTeacherName}」のメールアドレスが登録されていません。Teachersシートにメールアドレスを追加してください。` };
+    }
+
     // ロック解除
     const unlocked = unlockTeacherSheet_(spreadsheetId, teacherEmail);
     if (!unlocked) {
-      return { handled: true, message: 'ロック解除に失敗しました' };
+      return { handled: true, message: `ロック解除に失敗しました：${targetTeacherName}さん（${targetMonthKey}）\nシートID: ${spreadsheetId}\nメール: ${teacherEmail}\n詳細はログを確認してください。` };
     }
 
     // SubmissionsのlockedAtをクリア

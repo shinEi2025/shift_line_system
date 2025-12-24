@@ -151,7 +151,15 @@ function unlockTeacherSheet_(spreadsheetId, teacherEmail) {
     
     return true;
   } catch (err) {
-    logError_(err, 'unlockTeacherSheet_', { spreadsheetId, teacherEmail });
+    // より詳細なエラーログを出力
+    const errorDetails = {
+      spreadsheetId: spreadsheetId,
+      teacherEmail: teacherEmail,
+      errorMessage: err.message || String(err),
+      errorStack: err.stack || ''
+    };
+    logError_(err, 'unlockTeacherSheet_', errorDetails);
+    console.error('unlockTeacherSheet_ failed:', errorDetails);
     return false;
   }
 }

@@ -64,6 +64,92 @@ function isValidEmail_(email) {
 }
 
 /**
+ * 次のTeacher IDを取得（自動採番）
+ * @param {SpreadsheetApp.Spreadsheet} masterSs - マスタースプレッドシート
+ * @returns {string} 次のTeacher ID（例：T027）
+ */
+function getNextTeacherId_(masterSs) {
+  const sh = masterSs.getSheetByName(CONFIG.SHEET_TEACHERS);
+  if (!sh) throw new Error(`マスターにシート "${CONFIG.SHEET_TEACHERS}" がありません`);
+
+  const values = sh.getDataRange().getValues();
+  if (values.length < 2) return 'T001'; // データがない場合はT001から開始
+
+  const header = values[0];
+  const idxTeacherId = header.indexOf('teacherId');
+  if (idxTeacherId < 0) return 'T001'; // teacherId列がない場合
+
+  let maxNum = 0;
+  for (let r = 1; r < values.length; r++) {
+    const teacherId = String(values[r][idxTeacherId] || '').trim();
+    // T001, T002などの形式から数字を抽出
+    const match = teacherId.match(/^T(\d+)$/i);
+    if (match) {
+      const num = parseInt(match[1], 10);
+      if (num > maxNum) maxNum = num;
+    }
+  }
+
+  const nextNum = maxNum + 1;
+  return `T${String(nextNum).padStart(3, '0')}`; // T027形式
+}
+
+/**
+ * Teachersシートに新規講師を追加
+ * @param {SpreadsheetApp.Spreadsheet} masterSs - マスタースプレッドシート
+ * @param {string} teacherName - 講師氏名
+ * @param {string} lineUserId - LINE User ID
+ * @param {string} email - メールアドレス（任意）
+ * @returns {Object} 追加された講師情報（teacherId, name, row）
+ */
+function addNewTeacher_(masterSs, teacherName, lineUserId, email = '') {
+  const sh = masterSs.getSheetByName(CONFIG.SHEET_TEACHERS);
+  if (!sh) throw new Error(`マスターにシート "${CONFIG.SHEET_TEACHERS}" がありません`);
+
+  const header = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+  const idxTeacherId = header.indexOf('teacherId');
+  const idxName = header.indexOf('氏名');
+  const idxLine = header.indexOf('lineUserId');
+  const idxLinkedAt = header.indexOf('lineLinkedAt');
+  const idxEmail = header.indexOf('メール');
+
+  if (idxName < 0) throw new Error('Teachersに「氏名」列がありません');
+  if (idxLine < 0) throw new Error('Teachersに「lineUserId」列がありません');
+
+  // 次のTeacher IDを取得
+  const teacherId = getNextTeacherId_(masterSs);
+
+  // 新しい行を準備
+  const newRow = [];
+  for (let i = 0; i < header.length; i++) {
+    if (i === idxTeacherId) {
+      newRow[i] = teacherId;
+    } else if (i === idxName) {
+      newRow[i] = teacherName;
+    } else if (i === idxLine) {
+      newRow[i] = lineUserId;
+    } else if (i === idxLinkedAt) {
+      newRow[i] = new Date();
+    } else if (i === idxEmail && email) {
+      newRow[i] = email;
+    } else {
+      newRow[i] = '';
+    }
+  }
+
+  // 行を追加
+  sh.appendRow(newRow);
+  const newRowNum = sh.getLastRow();
+
+  return {
+    teacherId,
+    name: teacherName,
+    row: newRowNum,
+    email: email || ''
+  };
+}
+
+/**
  * Teachersの氏名で講師を探す（完全一致）
  * 必須: 氏名 / lineUserId
  * 任意: teacherId / メール

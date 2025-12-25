@@ -117,7 +117,20 @@ function doPost(e) {
       const result = linkLineUserByName_(master, nameKey, userId);
 
       if (result.status === 'not_found') {
-        replyLine_(replyToken, `まだ登録がありません。\n名簿（Teachers）に一致する氏名が見つかりませんでした：\n「${textRaw}」`);
+        // 新規講師を自動登録
+        const teacherName = textWithoutEmail || textRaw;
+        const newTeacher = addNewTeacher_(master, teacherName, userId, extractedEmail || '');
+        const lastName = extractLastName_(newTeacher.name);
+        
+        let message = `登録しました：${lastName}先生\n`;
+        message += `teacher_id = ${newTeacher.teacherId}\n`;
+        message += `氏名 = ${newTeacher.name}`;
+        
+        if (extractedEmail && isValidEmail_(extractedEmail)) {
+          message += `\nメールアドレス = ${extractedEmail}`;
+        }
+        
+        replyLine_(replyToken, message);
         continue;
       }
 

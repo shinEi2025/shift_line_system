@@ -108,30 +108,50 @@ function doPost(e) {
         }
       }
 
+      // 「講師登録」プレフィックスのチェック
+      const registrationPrefix = '講師登録';
+      const hasRegistrationPrefix = textRaw.trim().startsWith(registrationPrefix);
+      
       // メールアドレスが含まれているかチェック
       const extractedEmail = extractEmail_(textRaw);
-      const textWithoutEmail = textRaw.replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/, '').trim();
+      let textWithoutEmail = textRaw.replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/, '').trim();
       
-      // 氏名を抽出（メールアドレスを除いた部分）
+      // 「講師登録」プレフィックスを除去
+      if (hasRegistrationPrefix) {
+        textWithoutEmail = textWithoutEmail.replace(new RegExp(`^${registrationPrefix}\\s*`), '').trim();
+      }
+      
+      // 氏名を抽出（メールアドレスとプレフィックスを除いた部分）
       const nameKey = normalizeNameKey_(textWithoutEmail || textRaw);
       const result = linkLineUserByName_(master, nameKey, userId);
 
       if (result.status === 'not_found') {
-        // 新規講師を自動登録
-        const teacherName = textWithoutEmail || textRaw;
-        const newTeacher = addNewTeacher_(master, teacherName, userId, extractedEmail || '');
-        const lastName = extractLastName_(newTeacher.name);
-        
-        let message = `登録しました：${lastName}先生\n`;
-        message += `teacher_id = ${newTeacher.teacherId}\n`;
-        message += `氏名 = ${newTeacher.name}`;
-        
-        if (extractedEmail && isValidEmail_(extractedEmail)) {
-          message += `\nメールアドレス = ${extractedEmail}`;
+        // 「講師登録」プレフィックスがある場合のみ新規講師を自動登録
+        if (hasRegistrationPrefix) {
+          const teacherName = textWithoutEmail || textRaw;
+          if (!teacherName) {
+            replyLine_(replyToken, `講師登録：氏名を入力してください。\n例：講師登録 森永 英敬`);
+            continue;
+          }
+          
+          const newTeacher = addNewTeacher_(master, teacherName, userId, extractedEmail || '');
+          const lastName = extractLastName_(newTeacher.name);
+          
+          let message = `登録しました：${lastName}先生\n`;
+          message += `teacher_id = ${newTeacher.teacherId}\n`;
+          message += `氏名 = ${newTeacher.name}`;
+          
+          if (extractedEmail && isValidEmail_(extractedEmail)) {
+            message += `\nメールアドレス = ${extractedEmail}`;
+          }
+          
+          replyLine_(replyToken, message);
+          continue;
+        } else {
+          // 「講師登録」プレフィックスがない場合は無視（既存の動作）
+          replyLine_(replyToken, `まだ登録がありません。\n名簿（Teachers）に一致する氏名が見つかりませんでした：\n「${textRaw}」`);
+          continue;
         }
-        
-        replyLine_(replyToken, message);
-        continue;
       }
 
       if (result.status === 'multiple') {

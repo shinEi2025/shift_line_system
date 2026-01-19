@@ -2,29 +2,33 @@
  * Code.gs
  * - LINE webhook: doPost
  * - Form trigger: onFormSubmit
- * 
+ *
+ * 定数は utils.js で定義:
+ *   CONFIG, CONFIG_FORM, SHEET_CONFIG, DRIVE_CONFIG, LINE_CONFIG,
+ *   MESSAGE_SPREADSHEET_APP
+ *
  * 【設定が必要なスクリプトプロパティ】
  * - LINE_CHANNEL_ACCESS_TOKEN: LINE Botのチャネルアクセストークン
  * - ADMIN_LINE_USER_ID: 管理者のLINE User ID（例外通知用、任意）
  ************************************************************/
 
-const CONFIG = {
-  MASTER_SPREADSHEET_ID: '1mhBpPhuL6Aq-YRXgmCu1kMtg0g3JO7h37pHdWmM8sqE',
-  SHEET_TEACHERS: 'Teachers',
-  SHEET_SUBMISSIONS: 'Submissions',
+/**
+ * GETリクエストのハンドラー
+ * - OAuth認証コールバック（codeパラメータあり）
+ * - 通常のヘルスチェック（パラメータなし）
+ */
+function doGet(e) {
+  // OAuth認証コールバックの場合
+  if (e && e.parameter && e.parameter.code) {
+    return handleOAuthCallback_(e);
+  }
 
-  TEMPLATE_SPREADSHEET_ID: '1uVWYwQkr4zQ5UMwGCNL7nNkUvRwLA5v-IK2NlO1Ulyk',
-  COPIES_PARENT_FOLDER_ID: '1gxrQ_Kdh1aBGQYem__hxWP9h8HC7IKFo',
+  // OAuth認証ページの表示（authパラメータあり）
+  if (e && e.parameter && e.parameter.auth) {
+    return showOAuthPage_();
+  }
 
-  META_SHEET_NAME: '_META',
-};
-
-const CONFIG_FORM = {
-  QUESTION_TEACHER_NAME: '氏名',
-  QUESTION_MONTH_KEY: '提出月', // 例：2026-01
-};
-
-function doGet() {
+  // 通常のヘルスチェック
   return ContentService.createTextOutput('OK');
 }
 
@@ -60,6 +64,39 @@ function doPost(e) {
 
       // 管理者からのロック解除コマンドを処理
       if (adminLineUserId && userId === adminLineUserId) {
+        // 月の選択待ち状態を処理
+        const monthSelectKey = `MONTH_SELECT_${userId}`;
+        const monthSelectData = props.getProperty(monthSelectKey);
+        if (monthSelectData) {
+          try {
+            const selectInfo = JSON.parse(monthSelectData);
+            const selectedMonth = textRaw.trim();
+            
+            // 24時間以内の選択のみ有効
+            if (isStateExpired_(selectInfo.timestamp)) {
+              props.deleteProperty(monthSelectKey);
+            } else if (selectInfo.availableMonths.includes(selectedMonth)) {
+              // 選択された月でロック解除を実行
+              const unlockResult = handleAdminUnlockCommand_(master, `変更依頼 ${selectInfo.teacherName} ${selectedMonth}`);
+              if (unlockResult.handled) {
+                replyLine_(replyToken, unlockResult.message);
+              } else {
+                replyLine_(replyToken, `エラー：ロック解除に失敗しました。`);
+              }
+              props.deleteProperty(monthSelectKey);
+              continue;
+            } else {
+              // 無効な選択の場合、再度選択肢を提示
+              const monthList = selectInfo.availableMonths.map((m, i) => `${i + 1}. ${m}`).join('\n');
+              replyLine_(replyToken, `無効な選択です。以下の月から選択してください：\n${monthList}`);
+              continue;
+            }
+          } catch (e) {
+            console.error('Month selection error:', e);
+            props.deleteProperty(monthSelectKey);
+          }
+        }
+        
         // コマンド形式: "変更依頼: 講師名 月" または "変更依頼: 講師名" または "変更依頼:講師名"
         const unlockResult = handleAdminUnlockCommand_(master, textRaw);
         if (unlockResult.handled) {
@@ -70,41 +107,84 @@ function doPost(e) {
       }
 
       // メールアドレス更新の確認応答を処理
-      const props = PropertiesService.getScriptProperties();
       const emailUpdateKey = `EMAIL_UPDATE_${userId}`;
       const emailUpdateData = props.getProperty(emailUpdateKey);
       if (emailUpdateData) {
         try {
           const updateInfo = JSON.parse(emailUpdateData);
-          const responseText = textRaw.toLowerCase().trim();
-          
+
           // 24時間以内の確認のみ有効
-          const now = new Date().getTime();
-          if (now - updateInfo.timestamp > 24 * 60 * 60 * 1000) {
+          if (isStateExpired_(updateInfo.timestamp)) {
             props.deleteProperty(emailUpdateKey);
-          } else if (responseText === 'はい' || responseText === 'yes' || responseText === 'y') {
-            // メールアドレスを更新
-            const teacher = findTeacherByName_(master, updateInfo.name);
-            if (teacher) {
-              updateTeacherEmail_(master, teacher.row, updateInfo.newEmail);
-              replyLine_(replyToken, `メールアドレスを変更しました：${updateInfo.newEmail}`);
-            } else {
-              replyLine_(replyToken, `エラー：講師情報が見つかりませんでした。`);
-            }
-            props.deleteProperty(emailUpdateKey);
-            continue;
-          } else if (responseText === 'いいえ' || responseText === 'no' || responseText === 'n') {
-            replyLine_(replyToken, `メールアドレスの変更をキャンセルしました。`);
-            props.deleteProperty(emailUpdateKey);
-            continue;
           } else {
-            // 確認待ち状態を維持（「はい」「いいえ」以外のメッセージ）
-            replyLine_(replyToken, `メールアドレスの変更を続けますか？\n「はい」または「いいえ」と送信してください。`);
-            continue;
+            const confirmation = parseConfirmationResponse_(textRaw);
+            if (confirmation === 'yes') {
+              // メールアドレスを更新
+              const teacher = findTeacherByName_(master, updateInfo.name);
+              if (teacher) {
+                updateTeacherEmail_(master, teacher.row, updateInfo.newEmail);
+                replyLine_(replyToken, `メールアドレスを変更しました：${updateInfo.newEmail}`);
+              } else {
+                replyLine_(replyToken, `エラー：講師情報が見つかりませんでした。`);
+              }
+              props.deleteProperty(emailUpdateKey);
+              continue;
+            } else if (confirmation === 'no') {
+              replyLine_(replyToken, `メールアドレスの変更をキャンセルしました。`);
+              props.deleteProperty(emailUpdateKey);
+              continue;
+            } else {
+              // 確認待ち状態を維持（「はい」「いいえ」以外のメッセージ）
+              replyLine_(replyToken, `メールアドレスの変更を続けますか？\n「はい」または「いいえ」と送信してください。`);
+              continue;
+            }
           }
         } catch (e) {
           console.error('Email update confirmation error:', e);
           props.deleteProperty(emailUpdateKey);
+        }
+      }
+
+      // 初回登録時のメールアドレス待ち状態を処理
+      const emailRequestKey = `EMAIL_REQUEST_${userId}`;
+      const emailRequestData = props.getProperty(emailRequestKey);
+      if (emailRequestData) {
+        try {
+          const requestInfo = JSON.parse(emailRequestData);
+          const extractedEmail = extractEmail_(textRaw);
+          
+          // 24時間以内のリクエストのみ有効
+          if (isStateExpired_(requestInfo.timestamp)) {
+            props.deleteProperty(emailRequestKey);
+          } else if (extractedEmail && isValidEmail_(extractedEmail)) {
+            // メールアドレスが送信された場合
+            // Gmailアドレスかどうかをチェック
+            if (isGmailAddress_(extractedEmail)) {
+              // Gmailアドレスの場合、自動登録
+              const teacher = findTeacherByName_(master, requestInfo.name);
+              if (teacher && teacher.row) {
+                updateTeacherEmail_(master, teacher.row, extractedEmail);
+                const lastName = extractLastName_(requestInfo.name);
+                replyLine_(replyToken, `メールアドレスを登録しました：${extractedEmail}\n\n${lastName}先生、登録が完了しました。`);
+              } else {
+                replyLine_(replyToken, `エラー：講師情報が見つかりませんでした。`);
+              }
+              props.deleteProperty(emailRequestKey);
+            } else {
+              // Gmailアドレスでない場合、再度促す
+              const lastName = extractLastName_(requestInfo.name);
+              replyLine_(replyToken, `${lastName}先生、Gmailアドレスを登録してください。\nGmailアドレスを送信してください。\n例：example@gmail.com`);
+            }
+            continue;
+          } else {
+            // メールアドレスが含まれていない場合、再度促す
+            const lastName = extractLastName_(requestInfo.name);
+            replyLine_(replyToken, `${lastName}先生、Gmailアドレスを登録してください。\nGmailアドレスを送信してください。\n例：example@gmail.com`);
+            continue;
+          }
+        } catch (e) {
+          console.error('Email request processing error:', e);
+          props.deleteProperty(emailRequestKey);
         }
       }
 
@@ -114,43 +194,100 @@ function doPost(e) {
       
       // メールアドレスが含まれているかチェック
       const extractedEmail = extractEmail_(textRaw);
-      let textWithoutEmail = textRaw.replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/, '').trim();
+      const hasEmail = extractedEmail && extractedEmail.trim().length > 0;
+      
+      // まず、このLINE User IDで既に登録されている講師を検索
+      const existingTeacherByLineId = findTeacherByLineUserId_(master, userId);
+      
+      // 既に登録済みで、メールアドレスとLINE IDの両方が登録されている場合
+      if (existingTeacherByLineId) {
+        const hasEmailRegistered = existingTeacherByLineId.email && existingTeacherByLineId.email.trim().length > 0;
+        const hasLineIdRegistered = existingTeacherByLineId.lineUserId && existingTeacherByLineId.lineUserId.trim().length > 0;
+        
+        // メールアドレスとLINE IDの両方が登録済みの場合
+        if (hasEmailRegistered && hasLineIdRegistered) {
+          // メールアドレスが含まれていないメッセージは通常の会話として無視
+          if (!hasEmail && !hasRegistrationPrefix) {
+            continue; // 無視（エラーメッセージを送らない）
+          }
+          // メールアドレスが含まれている場合は、メールアドレス更新処理に進む
+        }
+        // どちらかが未登録の場合は、登録処理を続行
+      }
+      
+      // メールアドレスが含まれていない場合、既に完全登録済みでない限り登録処理を試みる
+      // メールアドレスが含まれている場合は必ず登録処理を実行
+      
+      // 氏名を抽出（メールアドレスや挨拶文を除去）
+      let extractedName = extractNameFromText_(textRaw);
       
       // 「講師登録」プレフィックスを除去
       if (hasRegistrationPrefix) {
-        textWithoutEmail = textWithoutEmail.replace(new RegExp(`^${registrationPrefix}\\s*`), '').trim();
+        extractedName = extractedName.replace(new RegExp(`^${registrationPrefix}\\s*`), '').trim();
       }
       
-      // 氏名を抽出（メールアドレスとプレフィックスを除いた部分）
-      const nameKey = normalizeNameKey_(textWithoutEmail || textRaw);
+      // 名前が抽出できない場合、メールアドレスを除いたテキスト全体を使用
+      if (!extractedName || extractedName.length < 1) {
+        let textWithoutEmail = textRaw.replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, '').trim();
+        if (hasRegistrationPrefix) {
+          textWithoutEmail = textWithoutEmail.replace(new RegExp(`^${registrationPrefix}\\s*`), '').trim();
+        }
+        extractedName = textWithoutEmail;
+      }
+      
+      // 氏名を正規化して検索
+      const nameKey = normalizeNameKey_(extractedName || textRaw);
+      console.log(`[DEBUG] extractedName: "${extractedName}", nameKey: "${nameKey}", extractedEmail: "${extractedEmail}"`);
       const result = linkLineUserByName_(master, nameKey, userId);
+      console.log(`[DEBUG] linkLineUserByName_ result: ${JSON.stringify(result)}`);
 
       if (result.status === 'not_found') {
-        // 「講師登録」プレフィックスがある場合のみ新規講師を自動登録
-        if (hasRegistrationPrefix) {
-          const teacherName = textWithoutEmail || textRaw;
-          if (!teacherName) {
-            replyLine_(replyToken, `講師登録：氏名を入力してください。\n例：講師登録 森永 英敬`);
+        // メールアドレスが含まれている場合のみ登録処理を実行
+        if (hasEmail || hasRegistrationPrefix) {
+          // 名前とメールアドレスの両方がある場合、または「講師登録」プレフィックスがある場合は自動登録
+          const teacherName = extractedName || textRaw.replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, '').trim();
+
+          // 名前が抽出できた場合は自動登録
+          if (teacherName && teacherName.length >= 2) {
+            const newTeacher = addNewTeacher_(master, teacherName, userId, extractedEmail || '');
+            const lastName = extractLastName_(newTeacher.name);
+
+            let message = `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}`;
+
+            if (extractedEmail && isValidEmail_(extractedEmail)) {
+              // Gmailアドレスかどうかをチェック
+              if (isGmailAddress_(extractedEmail)) {
+                message += `\n\nメールアドレスを登録しました：${extractedEmail}`;
+              } else {
+                // Gmailアドレスでない場合、Gmailアドレスを要求
+                const props = PropertiesService.getScriptProperties();
+                props.setProperty(`EMAIL_REQUEST_${userId}`, JSON.stringify({
+                  name: newTeacher.name,
+                  timestamp: new Date().getTime()
+                }));
+                message += `\n\nGmailアドレスを登録してください。\nGmailアドレスを送信してください。\n例：example@gmail.com`;
+              }
+            } else {
+              // メールアドレスが登録されていない場合、自動で要求
+              const props = PropertiesService.getScriptProperties();
+              props.setProperty(`EMAIL_REQUEST_${userId}`, JSON.stringify({
+                name: newTeacher.name,
+                timestamp: new Date().getTime()
+              }));
+              message += `\n\nGmailアドレスを登録してください。\nGmailアドレスを送信してください。\n例：example@gmail.com`;
+            }
+
+            replyLine_(replyToken, message);
+            continue;
+          } else {
+            // 名前が抽出できない場合はエラーメッセージ
+            replyLine_(replyToken, `お名前（フルネーム）とGmailアドレスの両方を送ってください。\n例：山田太郎 taro@gmail.com`);
             continue;
           }
-          
-          const newTeacher = addNewTeacher_(master, teacherName, userId, extractedEmail || '');
-          const lastName = extractLastName_(newTeacher.name);
-          
-          let message = `登録しました：${lastName}先生\n`;
-          message += `teacher_id = ${newTeacher.teacherId}\n`;
-          message += `氏名 = ${newTeacher.name}`;
-          
-          if (extractedEmail && isValidEmail_(extractedEmail)) {
-            message += `\nメールアドレス = ${extractedEmail}`;
-          }
-          
-          replyLine_(replyToken, message);
-          continue;
         } else {
-          // 「講師登録」プレフィックスがない場合は無視（既存の動作）
-          replyLine_(replyToken, `まだ登録がありません。\n名簿（Teachers）に一致する氏名が見つかりませんでした：\n「${textRaw}」`);
-          continue;
+          // メールアドレスが含まれていない場合、既に完全登録済みでない限り無視
+          // （既に完全登録済みの場合は上でcontinueされている）
+          continue; // 無視（エラーメッセージを送らない）
         }
       }
 
@@ -198,7 +335,8 @@ function doPost(e) {
       if (result.status === 'already_linked_same') {
         // 既に登録済みの場合、完全一致チェック
         const currentEmail = result.email || '';
-        
+        console.log(`[DEBUG] already_linked_same: currentEmail="${currentEmail}", extractedEmail="${extractedEmail}", isValidEmail=${isValidEmail_(extractedEmail)}`);
+
         // メールアドレスが含まれている場合
         if (extractedEmail && isValidEmail_(extractedEmail)) {
           if (currentEmail && currentEmail === extractedEmail) {
@@ -260,26 +398,43 @@ function doPost(e) {
             }));
             replyLine_(
               replyToken,
-              `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。\n\n登録されているメールアドレスと違います。\n現在: ${currentEmail}\n送信: ${extractedEmail}\n\n変更しますか？「はい」または「いいえ」と送信してください。`
+              `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}\n\n登録されているメールアドレスと違います。\n現在: ${currentEmail}\n送信: ${extractedEmail}\n\n変更しますか？「はい」または「いいえ」と送信してください。`
             );
             continue;
           } else if (!currentEmail) {
-            // メールアドレスが登録されていない場合、登録
-            if (result.row) {
-              updateTeacherEmail_(master, result.row, extractedEmail);
-              replyLine_(replyToken, `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。\n\nメールアドレスを登録しました：${extractedEmail}`);
+            // メールアドレスが登録されていない場合
+            // Gmailアドレスかどうかをチェック
+            if (isGmailAddress_(extractedEmail)) {
+              // Gmailアドレスの場合、登録
+              if (result.row) {
+                updateTeacherEmail_(master, result.row, extractedEmail);
+                replyLine_(replyToken, `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}\n\nメールアドレスを登録しました：${extractedEmail}`);
+              } else {
+                replyLine_(replyToken, `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}`);
+              }
             } else {
-              replyLine_(replyToken, `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。`);
+              // Gmailアドレスでない場合、Gmailアドレスを要求
+              const props = PropertiesService.getScriptProperties();
+              props.setProperty(`EMAIL_REQUEST_${userId}`, JSON.stringify({
+                name: result.name,
+                timestamp: new Date().getTime()
+              }));
+              replyLine_(replyToken, `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}\n\nGmailアドレスを登録してください。\nGmailアドレスを送信してください。\n例：example@gmail.com`);
             }
             continue;
           }
         }
         
         // メールアドレスが含まれていない場合
-        let message = `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。`;
+        let message = `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}`;
         if (!currentEmail) {
-          // メールアドレスが登録されていない場合、促す
-          message += `\n\n${lastName}先生、メールアドレスが登録されていません。\n「${result.name} メールアドレス」の形式で送信してください。`;
+          // メールアドレスが登録されていない場合、自動で要求
+          const props = PropertiesService.getScriptProperties();
+          props.setProperty(`EMAIL_REQUEST_${userId}`, JSON.stringify({
+            name: result.name,
+            timestamp: new Date().getTime()
+          }));
+          message += `\n\n${lastName}先生、Gmailアドレスを登録してください。\nGmailアドレスを送信してください。\n例：example@gmail.com`;
         }
         replyLine_(replyToken, message);
         continue;
@@ -338,55 +493,132 @@ function onFormSubmit(e) {
     const teacherEmail = teacher.email || '';
     const lineUserId = teacher.lineUserId || '';
 
-    // 月フォルダ確保 → テンプレコピー
-    const monthFolderId = ensureMonthFolder_(monthKey, CONFIG.COPIES_PARENT_FOLDER_ID);
-    const fileName = `${monthKey}_${teacherName}_シフト提出`;
-    const newSpreadsheetId = copyTemplateSpreadsheet_(monthFolderId, CONFIG.TEMPLATE_SPREADSHEET_ID, fileName);
-    const sheetUrl = `https://docs.google.com/spreadsheets/d/${newSpreadsheetId}/edit`;
-
-    // 編集権限付与
-    if (teacherEmail) {
-      grantEditPermission_(newSpreadsheetId, teacherEmail);
-    }
-
-    // Submissionsに記録
+    // Submissionsに記録（既存エントリがあれば更新、なければ新規作成）
     const submissionKey = `${monthKey}|${teacherId || normalizeNameKey_(teacherName)}`;
-    appendSubmission_(master, {
-      timestamp: new Date(),
-      monthKey,
-      teacherId,
-      name: teacherName,
-      sheetUrl,
-      status: 'created',
-      lastNotified: '',
-      submissionKey,
-      submittedAt: '',
-    });
+    const existingSubmission = findSubmissionByKey_(master, submissionKey);
+    
+    // 既存のsubmissionがあり、かつsheetUrlが存在する場合は、新しいシートを作成せず既存のシートを使用
+    let newSpreadsheetId = null;
+    let sheetUrl = '';
+    
+    if (existingSubmission && existingSubmission.sheetUrl && existingSubmission.sheetUrl.trim()) {
+      // 既存のシートを使用
+      sheetUrl = existingSubmission.sheetUrl.trim();
+      newSpreadsheetId = extractSpreadsheetId_(sheetUrl);
+      
+      // 既存エントリを更新（再送信の場合はackNotifiedAtをクリアして再提出受理通知を送れるようにする）
+      updateSubmission_(master, existingSubmission.row, existingSubmission.header, {
+        timestamp: new Date(), // フォーム送信日時で更新
+        sheetUrl: sheetUrl,
+        status: 'created', // シート作成済みに更新
+        ackNotifiedAt: '', // 再送信時はackNotifiedAtをクリア（再提出受理通知を送るため）
+      });
+    } else {
+      // 新しいシートを作成
+      // 月ごとのテンプレートを検索
+      let templateSpreadsheetId = null;
+      if (CONFIG.TEMPLATE_FOLDER_ID) {
+        templateSpreadsheetId = findTemplateByMonth_(monthKey, CONFIG.TEMPLATE_FOLDER_ID);
+      }
+      
+      // 月ごとのテンプレートが見つからない場合、エラーとして処理
+      if (!templateSpreadsheetId) {
+        // エラーログ（管理者向け、詳細は最小限）
+        const errorMsg = `${monthKey}のテンプレートが見つかりません`;
+        console.error(`[${new Date().toISOString()}] onFormSubmit: ${errorMsg}`, { monthKey, teacherName });
+        
+        // 講師にLINE通知（シンプルなメッセージ）
+        if (lineUserId) {
+          pushLine_(lineUserId, `${monthKey}のシフト申請用紙はありません。管理者に連絡してください。`);
+        }
+        
+        // Submissionsにエラー状態で記録
+        if (existingSubmission) {
+          updateSubmission_(master, existingSubmission.row, existingSubmission.header, {
+            timestamp: new Date(),
+            status: 'template_not_found',
+          });
+        } else {
+          appendSubmission_(master, {
+            timestamp: new Date(),
+            monthKey,
+            teacherId: teacherId || '',
+            name: teacherName,
+            sheetUrl: '',
+            status: 'template_not_found',
+            lastNotified: '',
+            submissionKey,
+            submittedAt: '',
+          });
+        }
+        return;
+      }
+      
+      // 月フォルダ確保 → テンプレコピー
+      const monthFolderId = ensureMonthFolder_(monthKey, CONFIG.COPIES_PARENT_FOLDER_ID);
+      const fileName = `${monthKey}_${teacherName}_シフト提出`;
+      newSpreadsheetId = copyTemplateSpreadsheet_(monthFolderId, templateSpreadsheetId, fileName);
+      sheetUrl = `https://docs.google.com/spreadsheets/d/${newSpreadsheetId}/edit`;
+
+      // 編集権限付与（新しいシートの場合のみ）
+      if (teacherEmail) {
+        const file = DriveApp.getFileById(newSpreadsheetId);
+        ensureEditor_(file, teacherEmail);
+      }
+
+      // Submissionsに記録
+      if (existingSubmission) {
+        // 既存エントリを更新
+        updateSubmission_(master, existingSubmission.row, existingSubmission.header, {
+          timestamp: new Date(), // フォーム送信日時で更新
+          sheetUrl: sheetUrl,
+          status: 'created', // シート作成済みに更新
+          ackNotifiedAt: '', // 再送信時はackNotifiedAtをクリア（再提出受理通知を送るため）
+        });
+      } else {
+        // 新規エントリを作成
+        appendSubmission_(master, {
+          timestamp: new Date(),
+          monthKey,
+          teacherId,
+          name: teacherName,
+          sheetUrl,
+          status: 'created',
+          lastNotified: '',
+          submissionKey,
+          submittedAt: '',
+        });
+      }
+    }
 
     // _META書き込み（テンプレ側表示や回収のため）
-    writeMetaToTeacherSheet_(newSpreadsheetId, CONFIG.META_SHEET_NAME, {
-      MASTER_SPREADSHEET_ID: CONFIG.MASTER_SPREADSHEET_ID,
-      SUBMISSIONS_SHEET_NAME: CONFIG.SHEET_SUBMISSIONS,
-      SUBMISSION_KEY: submissionKey,
-      MONTH_KEY: monthKey,
-      TEACHER_ID: teacherId,
-      TEACHER_NAME: teacherName,
-    });
+    // 既存のシートの場合でも、_METAとG3は更新する（念のため）
+    if (newSpreadsheetId) {
+      writeMetaToTeacherSheet_(newSpreadsheetId, CONFIG.META_SHEET_NAME, {
+        MASTER_SPREADSHEET_ID: CONFIG.MASTER_SPREADSHEET_ID,
+        SUBMISSIONS_SHEET_NAME: CONFIG.SHEET_SUBMISSIONS,
+        SUBMISSION_KEY: submissionKey,
+        MONTH_KEY: monthKey,
+        TEACHER_ID: teacherId,
+        TEACHER_NAME: teacherName,
+      });
 
-    // 講師名をG3に直接設定（シートを開いた時にすぐ表示されるように）
-    try {
-      const teacherSs = SpreadsheetApp.openById(newSpreadsheetId);
-      const inputSheet = teacherSs.getSheetByName('Input');
-      if (inputSheet) {
-        inputSheet.getRange('G3').setValue(teacherName);
+      // 講師名をG3に直接設定（シートを開いた時にすぐ表示されるように）
+      try {
+        const teacherSs = SpreadsheetApp.openById(newSpreadsheetId);
+        const inputSheet = teacherSs.getSheetByName('Input');
+        if (inputSheet) {
+          inputSheet.getRange('G3').setValue(teacherName);
+        }
+      } catch (e) {
+        // G3の設定に失敗しても続行（onOpen()で後から設定される）
+        console.error('Failed to set teacher name in G3:', e);
       }
-    } catch (e) {
-      // G3の設定に失敗しても続行（onOpen()で後から設定される）
-      console.error('Failed to set teacher name in G3:', e);
     }
 
-    // LINEにURL送信（登録済みのみ）
-    if (lineUserId) {
+    // LINEにURL送信（新しいシートの場合のみ、登録済みのみ）
+    // 既存のsubmissionがあり、既存のシートを使用する場合は、LINE通知を送信しない（重複通知を防ぐ）
+    if (lineUserId && (!existingSubmission || !existingSubmission.sheetUrl || !existingSubmission.sheetUrl.trim())) {
       pushLine_(lineUserId,
         `【シフト提出URL（${monthKey}）】\n${sheetUrl}\n\n入力後、☑（提出）を入れてください。`
       );
@@ -453,7 +685,7 @@ function handleAdminUnlockLatest_(masterSs) {
     const targetUrl = String(values[latestRow - 1][idxUrl] || '').trim();
     const targetTeacherId = idxTeacherId >= 0 ? String(values[latestRow - 1][idxTeacherId] || '').trim() : '';
     const targetTeacherName = String(values[latestRow - 1][idxName] || '').trim();
-    const targetMonthKey = idxMonthKey >= 0 ? String(values[latestRow - 1][idxMonthKey] || '').trim() : '';
+    const targetMonthKey = idxMonthKey >= 0 ? normalizeMonthKey_(values[latestRow - 1][idxMonthKey]) : '';
 
     if (!targetUrl) {
       return { handled: true, message: 'シートURLが見つかりません' };
@@ -477,31 +709,130 @@ function handleAdminUnlockLatest_(masterSs) {
     }
 
     // ロック解除
-    const unlocked = unlockTeacherSheet_(spreadsheetId, teacherEmail);
-    if (!unlocked) {
+    const unlockResult = unlockTeacherSheet_(spreadsheetId, teacherEmail);
+    if (!unlockResult.success) {
       const lastName = extractLastName_(targetTeacherName);
-      return { handled: true, message: `ロック解除に失敗しました：${lastName}先生（${targetMonthKey}）\nシートID: ${spreadsheetId}\nメール: ${teacherEmail}\n詳細はログを確認してください。` };
+      const errorMsg = unlockResult.errorMessage || '原因不明のエラー';
+      return { handled: true, message: `ロック解除に失敗しました：${lastName}先生（${targetMonthKey}）\n\n${errorMsg}` };
     }
 
-    // SubmissionsのlockedAtをクリア
+    // Submissionsの状態をリセット（再提出可能にする）
     if (idxLockedAt >= 0) {
       sh.getRange(latestRow, idxLockedAt + 1).setValue('');
+    }
+    // statusを'created'に戻す（再提出可能にする）
+    sh.getRange(latestRow, idxStatus + 1).setValue('created');
+    // submittedAtをクリア
+    if (idxSubmittedAt >= 0) {
+      sh.getRange(latestRow, idxSubmittedAt + 1).setValue('');
+    }
+    // ackNotifiedAtをクリア（再提出受理通知を送るため）
+    const idxAckNotifiedAt = header.indexOf('ackNotifiedAt');
+    if (idxAckNotifiedAt >= 0) {
+      sh.getRange(latestRow, idxAckNotifiedAt + 1).setValue('');
+    }
+
+    // 講師シートのチェックボックスとステータスをリセット
+    try {
+      const teacherSs = SpreadsheetApp.openById(spreadsheetId);
+      const inputSheet = teacherSs.getSheetByName('Input');
+      if (inputSheet) {
+        // チェックボックス（C2）をFALSEにリセット
+        inputSheet.getRange('C2').setValue(false);
+        // ステータス（B2）を「未提出」に戻す
+        inputSheet.getRange('B2').setValue('未提出');
+      }
+    } catch (e) {
+      console.error('Failed to reset checkbox and status:', e);
+      // エラーが発生しても続行
     }
 
     // 講師にLINE通知
     if (lineUserId) {
-      const lastName = extractLastName_(targetTeacherName);
       pushLine_(lineUserId,
-        `【シフト変更依頼】\n${lastName}先生（${targetMonthKey}）のシフトを変更していただくようお願いします。\nシートの編集が可能になりました。\n${targetUrl}`
+        `【シフト変更依頼】\n${extractLastName_(targetTeacherName)}先生（${targetMonthKey}）のシフトを変更していただくようお願いします。\nシートの編集が可能になりました。\n変更後、☑（提出）を入れてください。\n${targetUrl}`
       );
     }
 
-      const lastName = extractLastName_(targetTeacherName);
+    const lastName = extractLastName_(targetTeacherName);
     return { handled: true, message: `ロック解除しました：${lastName}先生（${targetMonthKey}）` };
 
   } catch (err) {
     handleError_(err, 'handleAdminUnlockLatest_');
     return { handled: true, message: 'エラーが発生しました：' + (err.message || String(err)) };
+  }
+}
+
+/**
+ * ロック解除コマンドをパース
+ * @param {string} command - コマンド文字列
+ * @returns {Object|null} {teacherName: string, monthKey: string} またはnull
+ */
+function parseUnlockCommand_(command) {
+  const trimmedCommand = command.trim();
+  let monthKey = '';
+  let teacherName = '';
+
+  // パターン0: 月が先頭（例：「2月変更依頼 森永英敬」）
+  let match = trimmedCommand.match(/^(\d{1,2})月変更依頼\s+(.+)$/);
+  if (match) {
+    monthKey = parseMonthText_(`${match[1]}月`);
+    teacherName = match[2].trim();
+    return { teacherName, monthKey };
+  }
+
+  // パターン1: コロンあり（全角/半角）
+  match = trimmedCommand.match(/^変更依頼[：:]\s*(.+?)(?:\s+(\d{4}-\d{2}))?\s*$/);
+
+  // パターン2: コロンなし、スペースで始まる
+  if (!match) {
+    match = trimmedCommand.match(/^変更依頼\s+(.+?)(?:\s+(\d{4}-\d{2}))?\s*$/);
+  }
+
+  if (!match || !match[1]) return null;
+
+  teacherName = match[1].trim();
+  // 月の形式（YYYY-MM）が講師名に含まれている場合は除外
+  if (teacherName.match(/^\d{4}-\d{2}$/)) return null;
+  if (!teacherName) return null;
+
+  monthKey = match[2] ? match[2].trim() : '';
+  return { teacherName, monthKey };
+}
+
+/**
+ * 再提出のためSubmissionsをリセット
+ * @param {SpreadsheetApp.Sheet} sh - Submissionsシート
+ * @param {number} row - 行番号
+ * @param {Object} indices - 列インデックス
+ */
+function resetSubmissionForResubmit_(sh, row, indices) {
+  if (indices.lockedAt >= 0) {
+    sh.getRange(row, indices.lockedAt + 1).setValue('');
+  }
+  sh.getRange(row, indices.status + 1).setValue('created');
+  if (indices.submittedAt >= 0) {
+    sh.getRange(row, indices.submittedAt + 1).setValue('');
+  }
+  if (indices.ackNotifiedAt >= 0) {
+    sh.getRange(row, indices.ackNotifiedAt + 1).setValue('');
+  }
+}
+
+/**
+ * 再提出のため講師シートをリセット
+ * @param {string} spreadsheetId - スプレッドシートID
+ */
+function resetTeacherSheetForResubmit_(spreadsheetId) {
+  try {
+    const teacherSs = SpreadsheetApp.openById(spreadsheetId);
+    const inputSheet = teacherSs.getSheetByName('Input');
+    if (inputSheet) {
+      inputSheet.getRange('C2').setValue(false);
+      inputSheet.getRange('B2').setValue('未提出');
+    }
+  } catch (e) {
+    console.error('Failed to reset teacher sheet:', e);
   }
 }
 
@@ -514,34 +845,13 @@ function handleAdminUnlockLatest_(masterSs) {
  */
 function handleAdminUnlockCommand_(masterSs, command) {
   try {
-    // コマンド形式: 
-    // - "変更依頼: 講師名 月" または "変更依頼: 講師名" または "変更依頼:講師名"
-    // - "変更依頼 講師名 月" または "変更依頼 講師名"（コロンなし、スペースのみ）
-    // コロンの有無、スペースの有無を柔軟に対応
-    const trimmedCommand = command.trim();
-    
-    // パターン1: コロンあり（全角/半角）
-    let match = trimmedCommand.match(/^変更依頼[：:]\s*(.+?)(?:\s+(\d{4}-\d{2}))?\s*$/);
-    
-    // パターン2: コロンなし、スペースで始まる
-    if (!match) {
-      match = trimmedCommand.match(/^変更依頼\s+(.+?)(?:\s+(\d{4}-\d{2}))?\s*$/);
-    }
-    
-    if (!match || !match[1]) {
+    // コマンドをパース
+    const parsed = parseUnlockCommand_(command);
+    if (!parsed) {
       return { handled: false, message: '' };
     }
-
-    let teacherNameRaw = match[1].trim();
-    // 月の形式（YYYY-MM）が講師名に含まれている場合は除外
-    if (teacherNameRaw.match(/^\d{4}-\d{2}$/)) {
-      return { handled: false, message: '' };
-    }
-    
-    if (!teacherNameRaw) {
-      return { handled: false, message: '' };
-    }
-    const monthKey = match[2] ? match[2].trim() : '';
+    const teacherNameRaw = parsed.teacherName;
+    let monthKey = parsed.monthKey;
 
     // Submissionsから該当する提出を検索
     const sh = masterSs.getSheetByName(CONFIG.SHEET_SUBMISSIONS);
@@ -561,9 +871,60 @@ function handleAdminUnlockCommand_(masterSs, command) {
     const idxMonthKey = header.indexOf('monthKey');
     const idxLockedAt = header.indexOf('lockedAt');
     const idxTeacherId = header.indexOf('teacherId');
+    const idxSubmittedAt = header.indexOf('submittedAt');
+    const idxAckNotifiedAt = header.indexOf('ackNotifiedAt');
 
     if (idxUrl < 0 || idxStatus < 0 || idxName < 0) {
       return { handled: true, message: 'Submissionsに必要列がありません' };
+    }
+
+    // 月が指定されていない場合、提出済みの月のリストを取得
+    if (!monthKey) {
+      const availableMonths = [];
+      const monthMap = new Map(); // 月ごとの情報を保持
+      
+      for (let r = 1; r < values.length; r++) {
+        const name = String(values[r][idxName] || '').trim();
+        const mk = idxMonthKey >= 0 ? normalizeMonthKey_(values[r][idxMonthKey]) : '';
+        const status = String(values[r][idxStatus] || '').trim();
+        
+        const nameMatch = normalizeNameKey_(name) === normalizeNameKey_(teacherNameRaw);
+        
+        if (nameMatch && status === 'submitted' && mk) {
+          if (!availableMonths.includes(mk)) {
+            availableMonths.push(mk);
+            monthMap.set(mk, {
+              row: r + 1,
+              url: String(values[r][idxUrl] || '').trim(),
+              teacherId: idxTeacherId >= 0 ? String(values[r][idxTeacherId] || '').trim() : '',
+              teacherName: name
+            });
+          }
+        }
+      }
+      
+      if (availableMonths.length === 0) {
+        return { handled: true, message: `提出済みのデータが見つかりません：${teacherNameRaw}\n提出済み（status='submitted'）のデータが必要です。` };
+      } else if (availableMonths.length === 1) {
+        // 1つだけの場合は自動的に選択
+        monthKey = availableMonths[0];
+      } else {
+        // 複数ある場合は選択肢を提示
+        const props = PropertiesService.getScriptProperties();
+        const adminLineUserId = PropertiesService.getScriptProperties().getProperty('ADMIN_LINE_USER_ID') || '';
+        if (adminLineUserId) {
+          props.setProperty(`MONTH_SELECT_${adminLineUserId}`, JSON.stringify({
+            teacherName: teacherNameRaw,
+            availableMonths: availableMonths,
+            timestamp: new Date().getTime()
+          }));
+          
+          const monthList = availableMonths.map((m, i) => `${i + 1}. ${m}`).join('\n');
+          return { handled: true, message: `${teacherNameRaw}先生の提出済みシフトが複数あります。\n変更したい月を選択してください：\n${monthList}\n\n月を送信してください（例：2026-01）` };
+        } else {
+          return { handled: true, message: `${teacherNameRaw}先生の提出済みシフトが複数あります（${availableMonths.join('、')}）。\n月を指定してください：変更依頼 ${teacherNameRaw} 2026-01` };
+        }
+      }
     }
 
     // 該当する提出を検索
@@ -575,7 +936,7 @@ function handleAdminUnlockCommand_(masterSs, command) {
 
     for (let r = 1; r < values.length; r++) {
       const name = String(values[r][idxName] || '').trim();
-      const mk = idxMonthKey >= 0 ? String(values[r][idxMonthKey] || '').trim() : '';
+      const mk = idxMonthKey >= 0 ? normalizeMonthKey_(values[r][idxMonthKey]) : '';
       const status = String(values[r][idxStatus] || '').trim();
 
       const nameMatch = normalizeNameKey_(name) === normalizeNameKey_(teacherNameRaw);
@@ -596,7 +957,7 @@ function handleAdminUnlockCommand_(masterSs, command) {
       let statusInfo = '';
       for (let r = 1; r < values.length; r++) {
         const name = String(values[r][idxName] || '').trim();
-        const mk = idxMonthKey >= 0 ? String(values[r][idxMonthKey] || '').trim() : '';
+        const mk = idxMonthKey >= 0 ? normalizeMonthKey_(values[r][idxMonthKey]) : '';
         const status = String(values[r][idxStatus] || '').trim();
         const nameMatch = normalizeNameKey_(name) === normalizeNameKey_(teacherNameRaw);
         const monthMatch = !monthKey || mk === monthKey;
@@ -630,26 +991,32 @@ function handleAdminUnlockCommand_(masterSs, command) {
     }
 
     // ロック解除
-    const unlocked = unlockTeacherSheet_(spreadsheetId, teacherEmail);
-    if (!unlocked) {
+    const unlockResult = unlockTeacherSheet_(spreadsheetId, teacherEmail);
+    if (!unlockResult.success) {
       const lastName = extractLastName_(targetTeacherName);
-      return { handled: true, message: `ロック解除に失敗しました：${lastName}先生（${targetMonthKey}）\nシートID: ${spreadsheetId}\nメール: ${teacherEmail}\n詳細はログを確認してください。` };
+      const errorMsg = unlockResult.errorMessage || '原因不明のエラー';
+      return { handled: true, message: `ロック解除に失敗しました：${lastName}先生（${targetMonthKey}）\n\n${errorMsg}` };
     }
 
-    // SubmissionsのlockedAtをクリア
-    if (idxLockedAt >= 0) {
-      sh.getRange(targetRow, idxLockedAt + 1).setValue('');
-    }
+    // Submissionsの状態をリセット（再提出可能にする）
+    resetSubmissionForResubmit_(sh, targetRow, {
+      lockedAt: idxLockedAt,
+      status: idxStatus,
+      submittedAt: idxSubmittedAt,
+      ackNotifiedAt: idxAckNotifiedAt
+    });
+
+    // 講師シートのチェックボックスとステータスをリセット
+    resetTeacherSheetForResubmit_(spreadsheetId);
 
     // 講師にLINE通知
     if (lineUserId) {
-      const lastName = extractLastName_(targetTeacherName);
       pushLine_(lineUserId,
-        `【シフト変更依頼】\n${lastName}先生（${targetMonthKey}）のシフトを変更していただくようお願いします。\nシートの編集が可能になりました。\n${targetUrl}`
+        `【シフト変更依頼】\n${extractLastName_(targetTeacherName)}先生（${targetMonthKey}）のシフトを変更していただくようお願いします。\nシートの編集が可能になりました。\n変更後、☑（提出）を入れてください。\n${targetUrl}`
       );
     }
 
-      const lastName = extractLastName_(targetTeacherName);
+    const lastName = extractLastName_(targetTeacherName);
     return { handled: true, message: `ロック解除しました：${lastName}先生（${targetMonthKey}）` };
 
   } catch (err) {
@@ -658,249 +1025,194 @@ function handleAdminUnlockCommand_(masterSs, command) {
   }
 }
 
-/************************************************************
- * テンプレ側（講師用シート）の関数
- * これらの関数は講師用シート（テンプレートからコピーされたシート）で実行されます
- ************************************************************/
-
-const SUBMIT_CONFIG = {
-  INPUT_SHEET_NAME: 'Input',
-  META_SHEET_NAME: '_META',
-
-  CHECK_ROW: 2,
-  CHECK_COL: 3, // C2
-
-  STATUS_CELL_A1: 'B2',
-  HELP_CELL_A1: 'D2',
-  TEACHER_NAME_CELL_A1: 'G3',
-};
-
 /**
- * 講師用シートが開かれた時に実行
- * - パネルを確保
- * - 講師名を設定
- * - ロック解除状態をチェック
+ * 谷口知子先生のメールアドレスを追加する関数（管理者用）
+ * Google Apps Scriptエディタで直接実行可能
  */
-function onOpen() {
-  ensurePanel_();
-  setTeacherNameFromMeta_();
-  // ロック解除状態をチェック（マスター側から解除された場合の復元）
-  checkAndUnlockIfNeeded_();
-}
-
-/**
- * 講師用シートの編集時に実行
- * - Input!C2がTRUEになったら提出済みにする
- * - シートをロック（編集不可にする）
- */
-function onEdit(e) {
+function registerTaniguchi() {
   try {
-    if (!e || !e.range) return;
-    const sh = e.range.getSheet();
-    if (sh.getName() !== SUBMIT_CONFIG.INPUT_SHEET_NAME) return;
-
-    if (e.range.getRow() !== SUBMIT_CONFIG.CHECK_ROW || e.range.getColumn() !== SUBMIT_CONFIG.CHECK_COL) return;
-
-    const val = e.range.getValue();
-    if (val !== true) return;
-
-    // 提出済みに設定
-    sh.getRange(SUBMIT_CONFIG.STATUS_CELL_A1).setValue('提出済');
-
-    // シートをロック（編集不可にする）
-    lockSheetAfterSubmission_();
-
-    SpreadsheetApp.getActiveSpreadsheet().toast('提出済にしました。シートは編集不可になりました。', 'シフト提出', 5);
-  } catch (err) {
-    console.error('onEdit error:', err);
-  }
-}
-
-/**
- * 提出後にシートをロック（編集不可にする）
- * - すべてのシートを保護
- * - 現在のユーザー（講師）の編集権限を削除
- * - 管理者（スクリプト実行者）は常に編集可能
- */
-function lockSheetAfterSubmission_() {
-  try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sheets = ss.getSheets();
-    const currentUser = Session.getActiveUser().getEmail();
-    const scriptOwner = Session.getEffectiveUser().getEmail();
-
-    // 既存の保護を削除（重複防止）
-    sheets.forEach(sheet => {
-      const protections = sheet.getProtections(SpreadsheetApp.ProtectionType.SHEET);
-      protections.forEach(prot => {
-        if (prot.getDescription() === '提出後ロック') {
-          prot.remove();
-        }
-      });
-    });
-
-    // 各シートを保護
-    sheets.forEach(sheet => {
-      const protection = sheet.protect().setDescription('提出後ロック');
-
-      // 管理者（スクリプト実行者）は常に編集可能
-      try {
-        protection.addEditor(scriptOwner);
-      } catch (e) {
-        // 既にエディターリストに含まれている場合は無視
-      }
-
-      // 現在のユーザー（講師）の編集権限を削除
-      if (currentUser && currentUser !== scriptOwner) {
-        try {
-          protection.removeEditor(currentUser);
-        } catch (e) {
-          // エディターリストに含まれていない場合は無視
-        }
-      }
-    });
-
-    // ファイルレベルでも講師の編集権限を削除（閲覧のみに変更）
-    try {
-      const file = DriveApp.getFileById(ss.getId());
-      if (currentUser && currentUser !== scriptOwner) {
-        file.removeEditor(currentUser);
-        file.addViewer(currentUser);
-      }
-    } catch (e) {
-      // ファイルレベルの権限変更に失敗しても続行
-      console.error('File-level permission change failed:', e);
+    const master = SpreadsheetApp.openById(CONFIG.MASTER_SPREADSHEET_ID);
+    const sh = master.getSheetByName(CONFIG.SHEET_TEACHERS);
+    if (!sh) {
+      throw new Error('Teachersシートが見つかりません');
     }
-
-  } catch (err) {
-    console.error('lockSheetAfterSubmission_ error:', err);
-    // ロックに失敗しても提出処理は続行
-  }
-}
-
-/**
- * シートのロックを解除（管理者からの変更依頼時）
- * この関数は管理者が手動で実行するか、マスター側から呼び出される
- * onOpen時に自動的にロック解除状態をチェックして復元する
- */
-function unlockSheetForRevision_() {
-  try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sheets = ss.getSheets();
-    const currentUser = Session.getActiveUser().getEmail();
-
-    // すべての保護を解除（説明が「提出後ロック」のもの、または空の保護も）
-    let protectionRemoved = false;
-    sheets.forEach(sheet => {
-      const protections = sheet.getProtections(SpreadsheetApp.ProtectionType.SHEET);
-      protections.forEach(prot => {
-        const desc = prot.getDescription();
-        if (desc === '提出後ロック' || desc === '' || !desc) {
-          try {
-            prot.remove();
-            protectionRemoved = true;
-          } catch (e) {
-            console.error('Failed to remove protection:', e);
-          }
-        }
-      });
-    });
-
-    // ファイルレベルで編集権限を再付与
-    try {
-      const file = DriveApp.getFileById(ss.getId());
-      const viewers = file.getViewers().map(u => u.getEmail());
-      
-      if (currentUser && viewers.includes(currentUser)) {
-        file.removeViewer(currentUser);
-        file.addEditor(currentUser);
-      }
-    } catch (e) {
-      console.error('File-level permission restoration failed:', e);
-    }
-
-    if (protectionRemoved) {
-      SpreadsheetApp.getActiveSpreadsheet().toast('ロックを解除しました。編集可能になりました。', 'ロック解除', 5);
-    }
-    return true;
-  } catch (err) {
-    console.error('unlockSheetForRevision_ error:', err);
-    return false;
-  }
-}
-
-/**
- * onOpen時にロック状態をチェックして、必要に応じてロック解除
- * マスター側からロック解除された場合、講師がシートを開いた時に自動的に編集可能になる
- */
-function checkAndUnlockIfNeeded_() {
-  try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const file = DriveApp.getFileById(ss.getId());
-    const currentUser = Session.getActiveUser().getEmail();
     
-    // 現在のユーザーがビューアーの場合、ロック解除を試みる
-    const viewers = file.getViewers().map(u => u.getEmail());
-    if (currentUser && viewers.includes(currentUser)) {
-      // マスター側でロック解除されている可能性があるので、保護を解除
-      unlockSheetForRevision_();
+    // 谷口知子先生を検索（柔軟なマッチング）
+    const existing = findTeacherByName_(master, '谷口知子');
+    if (!existing) {
+      // 見つからない場合は新規登録
+      const result = addTeacherManually('谷口知子', 'satorara0510@gmail.com');
+      console.log(`新規登録完了:`);
+      console.log(`- 氏名: ${result.name}`);
+      console.log(`- teacherId: ${result.teacherId}`);
+      console.log(`- メール: ${result.email}`);
+      return `新規登録完了: ${result.name} (teacherId: ${result.teacherId})`;
     }
-  } catch (e) {
-    // エラーは無視
+    
+    console.log(`既に登録済みです:`);
+    console.log(`- 氏名: ${existing.name}`);
+    console.log(`- teacherId: ${existing.teacherId}`);
+    console.log(`- メール: ${existing.email || '(未登録)'}`);
+    console.log(`- LINE User ID: ${existing.lineUserId || '(未登録)'}`);
+    console.log(`- 行番号: ${existing.row}`);
+    
+    // メールアドレスを直接更新
+    const email = 'satorara0510@gmail.com';
+    const header = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+    const idxEmail = header.indexOf('メール');
+    
+    if (idxEmail < 0) {
+      throw new Error('メール列が見つかりません');
+    }
+    
+    // メールアドレスを更新
+    sh.getRange(existing.row, idxEmail + 1).setValue(email);
+    
+    console.log(`メールアドレスを追加/更新しました: ${email}`);
+    
+    // 更新後の情報を確認
+    const updated = findTeacherByName_(master, '谷口知子');
+    console.log(`更新後の情報:`);
+    console.log(`- 氏名: ${updated.name}`);
+    console.log(`- teacherId: ${updated.teacherId}`);
+    console.log(`- メール: ${updated.email}`);
+    
+    return `メールアドレスを追加しました: ${email}`;
+  } catch (err) {
+    console.error('登録エラー:', err);
+    throw err;
   }
 }
 
 /**
- * パネルを確保（Inputシートの状態表示）
+ * 講師を手動登録してLINE通知を送る汎用関数（管理者用）
+ * @param {string} teacherName - 講師名
+ * @param {string} email - メールアドレス
+ * @param {string} lineUserId - LINE User ID
  */
-function ensurePanel_() {
-  const sh = SpreadsheetApp.getActive().getSheetByName(SUBMIT_CONFIG.INPUT_SHEET_NAME);
-  if (!sh) return;
-
-  if (!String(sh.getRange(SUBMIT_CONFIG.STATUS_CELL_A1).getValue() || '').trim()) {
-    sh.getRange(SUBMIT_CONFIG.STATUS_CELL_A1).setValue('未提出');
+function registerTeacherManually_(teacherName, email, lineUserId) {
+  const master = SpreadsheetApp.openById(CONFIG.MASTER_SPREADSHEET_ID);
+  const sh = master.getSheetByName(CONFIG.SHEET_TEACHERS);
+  if (!sh) {
+    throw new Error('Teachersシートが見つかりません');
   }
 
-  const help = sh.getRange(SUBMIT_CONFIG.HELP_CELL_A1);
-  if (!String(help.getValue() || '').trim()) help.setValue('入力後、☑で提出完了');
+  // 既存の講師を検索
+  const existing = findTeacherByName_(master, teacherName);
+
+  if (existing) {
+    console.log(`既に登録済み: ${existing.name}`);
+    // LINE User IDとメールアドレスを更新
+    const header = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+    const idxEmail = header.indexOf('メール');
+    const idxLine = header.indexOf('lineUserId');
+    const idxLinkedAt = header.indexOf('lineLinkedAt');
+
+    if (idxEmail >= 0) sh.getRange(existing.row, idxEmail + 1).setValue(email);
+    if (idxLine >= 0) sh.getRange(existing.row, idxLine + 1).setValue(lineUserId);
+    if (idxLinkedAt >= 0) sh.getRange(existing.row, idxLinkedAt + 1).setValue(new Date());
+  } else {
+    // 新規登録
+    const newTeacher = addNewTeacher_(master, teacherName, lineUserId, email);
+    console.log(`新規登録完了: ${newTeacher.name} (teacherId: ${newTeacher.teacherId})`);
+  }
+
+  // LINE通知を送信
+  const lastName = extractLastName_(teacherName);
+  const message = `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}\n\nメールアドレスを登録しました：${email}`;
+  pushLine_(lineUserId, message);
+
+  console.log('LINE通知を送信しました');
+  return `登録完了: ${teacherName} (LINE通知送信済み)`;
 }
 
 /**
- * _METAシートから講師名を取得して表示
- * シートを開いた時に必ず講師名がG3に表示されるようにする
+ * 落合将生先生を登録してLINE通知を送る関数（管理者用）
  */
-function setTeacherNameFromMeta_() {
+function registerOchiai() {
+  const lineUserId = 'U6889bd1984ab7697850c7be19e1f5f74';
+  return registerTeacherManually_('落合将生', 'masaki.180228@gmail.com', lineUserId);
+}
+
+/**
+ * 末河翔真先生に登録完了メッセージを送る関数（管理者用）
+ * Google Apps Scriptエディタで直接実行
+ */
+function sendMessageToSuekawa() {
+  const lineUserId = 'U8ce9ba286178abdf94096e08051942b3';
+  const email = 'shoma180808@gmail.com';
+  const message = `登録OK：末河先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}\n\nメールアドレスを登録しました：${email}`;
+  pushLine_(lineUserId, message);
+  console.log('LINE通知を送信しました');
+  return '末河先生にメッセージを送信しました';
+}
+
+/**
+ * 落合先生と末河先生に初回メッセージを送る関数（管理者用）
+ * Google Apps Scriptエディタで直接実行
+ */
+function sendInitialMessageToNewTeachers() {
+  const teachers = [
+    { name: '落合', lineUserId: 'U6889bd1984ab7697850c7be19e1f5f74', email: 'masaki.180228@gmail.com' },
+    { name: '末河', lineUserId: 'U8ce9ba286178abdf94096e08051942b3', email: 'shoma180808@gmail.com' }
+  ];
+
+  const results = [];
+  for (const teacher of teachers) {
+    const message = `登録OK：${teacher.name}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}\n\nメールアドレスを登録しました：${teacher.email}`;
+    pushLine_(teacher.lineUserId, message);
+    console.log(`${teacher.name}先生にメッセージを送信しました`);
+    results.push(`${teacher.name}先生: 送信完了`);
+  }
+
+  return results.join('\n');
+}
+
+/**
+ * 落合先生と末河先生にシフト申請依頼メッセージを送る関数（管理者用）
+ * Google Apps Scriptエディタで直接実行
+ */
+function sendShiftRequestToNewTeachers() {
+  const monthKey = '2026-02';
+  const teachers = [
+    { name: '落合', lineUserId: 'U6889bd1984ab7697850c7be19e1f5f74' },
+    { name: '末河', lineUserId: 'U8ce9ba286178abdf94096e08051942b3' }
+  ];
+
+  const results = [];
+  for (const teacher of teachers) {
+    const message = `【シフト申請のお願い】\n${teacher.name}先生、${monthKey}のシフト申請をお願いします。`;
+    pushLine_(teacher.lineUserId, message);
+    console.log(`${teacher.name}先生にシフト申請依頼を送信しました`);
+    results.push(`${teacher.name}先生: 送信完了`);
+  }
+
+  return results.join('\n');
+}
+
+/**
+ * 最後のWebhookリクエストを確認する関数（デバッグ用）
+ */
+function checkLastBody() {
+  const props = PropertiesService.getScriptProperties();
+  const lastBody = props.getProperty('LAST_BODY') || '';
+  const hitCount = props.getProperty('HIT_COUNT') || '0';
+
+  console.log('HIT_COUNT:', hitCount);
+  console.log('LAST_BODY:', lastBody);
+
   try {
-    const meta = getMeta_();
-    const name = String(meta.TEACHER_NAME || '').trim();
-    if (!name) return;
+    const payload = JSON.parse(lastBody);
+    console.log('Parsed payload:', JSON.stringify(payload, null, 2));
 
-    const sh = SpreadsheetApp.getActive().getSheetByName(SUBMIT_CONFIG.INPUT_SHEET_NAME);
-    if (!sh) return;
-
-    const cell = sh.getRange(SUBMIT_CONFIG.TEACHER_NAME_CELL_A1);
-    const currentValue = String(cell.getValue() || '').trim();
-    // 現在の値が空、または異なる場合は更新
-    if (!currentValue || currentValue !== name) {
-      cell.setValue(name);
+    if (payload.events && payload.events.length > 0) {
+      const event = payload.events[0];
+      console.log('User ID:', event.source?.userId);
+      console.log('Message:', event.message?.text);
     }
   } catch (e) {
-    console.error('setTeacherNameFromMeta_ error:', e);
+    console.log('Parse error:', e);
   }
+
+  return { hitCount, lastBody };
 }
-
-/**
- * _METAシートから情報を取得
- */
-function getMeta_() {
-  const ss = SpreadsheetApp.getActive();
-  const sh = ss.getSheetByName(SUBMIT_CONFIG.META_SHEET_NAME);
-  if (!sh) return {};
-
-  const data = sh.getDataRange().getValues();
-  const obj = {};
-  for (const [k, v] of data) if (k) obj[String(k).trim()] = String(v || '').trim();
-  return obj;
-}
-
-// synced from vscode

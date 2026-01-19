@@ -38,3 +38,31 @@ clasp logs
 clasp logs --watch
 
 ------------------------------------------------------
+
+morinagahidetaka@morinagahidetakanoMac-mini projects % clasp push --watch
+
+Project settings not found.
+morinagahidetaka@morinagahidetakanoMac-mini projects % ls -a
+
+.       ..      gas
+morinagahidetaka@morinagahidetakanoMac-mini projects % cd gas
+
+morinagahidetaka@morinagahidetakanoMac-mini gas % ls -a
+
+.               ..              my-gas-project
+morinagahidetaka@morinagahidetakanoMac-mini gas % cd my-gas-project
+morinagahidetaka@morinagahidetakanoMac-mini my-gas-project % ls -a
+.               .clasp.json     .vscode         appsscript.json line.js         template.gs     xxxmemo.txt
+..              .clasprc.json   Code.js         drive.js        submissions.js  utils.js
+morinagahidetaka@morinagahidetakanoMac-mini my-gas-project % clasp push --watch
+
+Pushed 7 files.
+└─ appsscript.json
+└─ Code.js
+└─ drive.js
+└─ line.js
+└─ submissions.js
+└─ template.gs
+└─ utils.js
+Waiting for changes...
+

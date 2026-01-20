@@ -87,6 +87,65 @@ function ensureViewer_(file, email) {
 }
 
 /**
+ * 「リンクを知っているすべての人」を編集者に設定
+ * @param {string} fileId - ファイルID
+ * @returns {boolean} 設定に成功した場合true
+ */
+function setAnyoneWithLinkCanEdit_(fileId) {
+  try {
+    Drive.Permissions.create(
+      {
+        type: 'anyone',
+        role: 'writer'
+      },
+      fileId
+    );
+    console.log(`setAnyoneWithLinkCanEdit_: Successfully set anyone with link as editor for file: ${fileId}`);
+    return true;
+  } catch (err) {
+    console.error(`setAnyoneWithLinkCanEdit_ error: ${err.message || err}`);
+    return false;
+  }
+}
+
+/**
+ * 「リンクを知っているすべての人」を閲覧者に設定（編集権限を削除）
+ * @param {string} fileId - ファイルID
+ * @returns {boolean} 設定に成功した場合true
+ */
+function setAnyoneWithLinkCanView_(fileId) {
+  try {
+    // まず既存の「anyone」権限を取得
+    const permissions = Drive.Permissions.list(fileId).permissions || [];
+    const anyonePermission = permissions.find(p => p.type === 'anyone');
+
+    if (anyonePermission) {
+      // 既存の権限を更新（writerからreaderに変更）
+      Drive.Permissions.update(
+        { role: 'reader' },
+        fileId,
+        anyonePermission.id
+      );
+      console.log(`setAnyoneWithLinkCanView_: Successfully updated anyone permission to reader for file: ${fileId}`);
+    } else {
+      // 権限が存在しない場合は新規作成
+      Drive.Permissions.create(
+        {
+          type: 'anyone',
+          role: 'reader'
+        },
+        fileId
+      );
+      console.log(`setAnyoneWithLinkCanView_: Successfully created anyone reader permission for file: ${fileId}`);
+    }
+    return true;
+  } catch (err) {
+    console.error(`setAnyoneWithLinkCanView_ error: ${err.message || err}`);
+    return false;
+  }
+}
+
+/**
  * Drive Advanced Serviceを使用して、メール通知なしで権限を追加
  * @param {string} fileId - ファイルID
  * @param {string} email - 追加するメールアドレス
@@ -290,16 +349,19 @@ function findScriptIdBySpreadsheetId_(spreadsheetId) {
 
 /**
  * 講師シートをロック（提出後、編集不可にする）
- * - すべてのシートを保護し、講師の編集権限を削除
+ * - 「リンクを知っているすべての人」を閲覧のみに変更
+ * - すべてのシートを保護
  * - 管理者（スクリプト実行者）は常に編集可能
  */
 function lockTeacherSheet_(spreadsheetId, teacherEmail) {
   try {
     const ss = SpreadsheetApp.openById(spreadsheetId);
     const sheets = ss.getSheets();
-    
+
+    // 「リンクを知っているすべての人」を閲覧のみに変更
+    setAnyoneWithLinkCanView_(spreadsheetId);
+
     // 既存の保護を削除（重複防止）
-    const existingProtections = [];
     sheets.forEach(sheet => {
       const protections = sheet.getProtections(SpreadsheetApp.ProtectionType.SHEET);
       protections.forEach(prot => {
@@ -308,30 +370,13 @@ function lockTeacherSheet_(spreadsheetId, teacherEmail) {
         }
       });
     });
-    
+
     // 各シートを保護
     sheets.forEach(sheet => {
       const protection = sheet.protect().setDescription(SHEET_CONFIG.PROTECTION_DESCRIPTION);
-      
-      // 講師の編集権限を削除（閲覧のみ）
       // 保護のデフォルトで所有者とスクリプト実行者は編集可能
-      if (teacherEmail) {
-        try {
-          protection.removeEditor(teacherEmail);
-        } catch (e) {
-          // エディターリストに含まれていない場合は無視
-        }
-      }
     });
-    
-    // ファイルレベルで講師の編集権限を削除（閲覧のみに変更）
-    // メール通知を送らないようにDrive Advanced Serviceを使用
-    if (teacherEmail) {
-      const file = DriveApp.getFileById(spreadsheetId);
-      file.removeEditor(teacherEmail);
-      ensureViewer_(file, teacherEmail);
-    }
-    
+
     return true;
   } catch (err) {
     logError_(err, 'lockTeacherSheet_', { spreadsheetId, teacherEmail });
@@ -449,8 +494,10 @@ function restoreTeacherEditAccess_(file, teacherEmail, viewers) {
 
 /**
  * 講師シートのロックを解除（管理者からの変更依頼時）
+ * - 「リンクを知っているすべての人」を編集者に変更
+ * - すべてのシート保護を削除
  * @param {string} spreadsheetId - スプレッドシートID
- * @param {string} teacherEmail - 講師のメールアドレス
+ * @param {string} teacherEmail - 講師のメールアドレス（互換性のため保持）
  * @returns {Object} {success: boolean, errorMessage: string|null}
  */
 function unlockTeacherSheet_(spreadsheetId, teacherEmail) {
@@ -461,7 +508,6 @@ function unlockTeacherSheet_(spreadsheetId, teacherEmail) {
     const ss = SpreadsheetApp.openById(spreadsheetId);
     const file = DriveApp.getFileById(spreadsheetId);
     const owner = file.getOwner().getEmail();
-    const viewers = file.getViewers().map(u => u.getEmail());
 
     // ステップ1: スクリプト実行者の編集権限を確保
     const step1 = ensureScriptOwnerCanEdit_(file, scriptOwner, owner);
@@ -475,10 +521,9 @@ function unlockTeacherSheet_(spreadsheetId, teacherEmail) {
       errors.push(`ステップ2失敗: 保護の削除に失敗しました。\n${step2.errors.join('\n')}`);
     }
 
-    // ステップ3: 講師の編集権限を復元
-    const step3 = restoreTeacherEditAccess_(file, teacherEmail, viewers);
-    if (!step3.success) {
-      errors.push(`ステップ3失敗: ${step3.errors.join(', ')}`);
+    // ステップ3: 「リンクを知っているすべての人」を編集者に変更
+    if (!setAnyoneWithLinkCanEdit_(spreadsheetId)) {
+      errors.push(`ステップ3失敗: リンク共有権限を編集者に変更できませんでした。`);
     }
 
     // エラーがある場合は詳細を返す
@@ -488,7 +533,6 @@ function unlockTeacherSheet_(spreadsheetId, teacherEmail) {
         `- シートID: ${spreadsheetId}\n` +
         `- スクリプト実行者: ${scriptOwner}\n` +
         `- シート所有者: ${owner}\n` +
-        `- 講師メール: ${teacherEmail || '(未指定)'}\n` +
         `- スクリプト実行者がエディター: ${step1.isEditor ? 'はい' : 'いいえ'}`;
 
       logError_(new Error(errorMessage), 'unlockTeacherSheet_', {

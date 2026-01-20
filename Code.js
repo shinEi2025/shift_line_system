@@ -560,11 +560,8 @@ function onFormSubmit(e) {
       newSpreadsheetId = copyTemplateSpreadsheet_(monthFolderId, templateSpreadsheetId, fileName);
       sheetUrl = `https://docs.google.com/spreadsheets/d/${newSpreadsheetId}/edit`;
 
-      // 編集権限付与（新しいシートの場合のみ）
-      if (teacherEmail) {
-        const file = DriveApp.getFileById(newSpreadsheetId);
-        ensureEditor_(file, teacherEmail);
-      }
+      // 「リンクを知っているすべての人」を編集者に設定（新しいシートの場合のみ）
+      setAnyoneWithLinkCanEdit_(newSpreadsheetId);
 
       // Submissionsに記録
       if (existingSubmission) {

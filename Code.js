@@ -360,20 +360,26 @@ function doPost(e) {
             continue;
           } else if (!currentEmail) {
             // メールアドレスが登録されていない場合、登録
+            const lastName = extractLastName_(result.name);
             if (result.row) {
               updateTeacherEmail_(master, result.row, extractedEmail);
-              replyLine_(replyToken, `メールアドレスを登録しました：${extractedEmail}`);
+              replyLine_(replyToken, `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}\n\nメールアドレスを登録しました：${extractedEmail}`);
+            } else {
+              // result.rowがない場合でも返信を送信
+              replyLine_(replyToken, `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}`);
             }
             continue;
           }
+          // フォールバック：条件に一致しない場合（通常は到達しない）
+          const lastName = extractLastName_(result.name);
+          replyLine_(replyToken, `既に登録済みです：${lastName}先生`);
+          continue;
         } else {
           // メールアドレスが含まれていない場合、既に登録済みと返す
           const lastName = extractLastName_(result.name);
           replyLine_(replyToken, `既に登録済みです：${lastName}先生`);
           continue;
         }
-        // フォールバック：何も返さない（静かに無視）
-        continue;
       }
 
       if (result.status === 'linked') {
@@ -617,7 +623,7 @@ function onFormSubmit(e) {
     // 既存のsubmissionがあり、既存のシートを使用する場合は、LINE通知を送信しない（重複通知を防ぐ）
     if (lineUserId && (!existingSubmission || !existingSubmission.sheetUrl || !existingSubmission.sheetUrl.trim())) {
       pushLine_(lineUserId,
-        `【シフト提出URL（${monthKey}）】\n${sheetUrl}\n\n入力後、☑（提出）を入れてください。`
+        `【シフト提出URL（${monthKey}）】\n${sheetUrl}\n\n※編集するには登録したGmailでGoogleにログインしてください。\n入力後、☑（提出）を入れてください。`
       );
     }
 
@@ -747,7 +753,7 @@ function handleAdminUnlockLatest_(masterSs) {
     // 講師にLINE通知
     if (lineUserId) {
       pushLine_(lineUserId,
-        `【シフト変更依頼】\n${extractLastName_(targetTeacherName)}先生（${targetMonthKey}）のシフトを変更していただくようお願いします。\nシートの編集が可能になりました。\n変更後、☑（提出）を入れてください。\n${targetUrl}`
+        `【シフト変更依頼】\n${extractLastName_(targetTeacherName)}先生（${targetMonthKey}）のシフトを変更していただくようお願いします。\nシートの編集が可能になりました。\n\n※編集するには登録したGmailでGoogleにログインしてください。\n変更後、☑（提出）を入れてください。\n${targetUrl}`
       );
     }
 
@@ -1009,7 +1015,7 @@ function handleAdminUnlockCommand_(masterSs, command) {
     // 講師にLINE通知
     if (lineUserId) {
       pushLine_(lineUserId,
-        `【シフト変更依頼】\n${extractLastName_(targetTeacherName)}先生（${targetMonthKey}）のシフトを変更していただくようお願いします。\nシートの編集が可能になりました。\n変更後、☑（提出）を入れてください。\n${targetUrl}`
+        `【シフト変更依頼】\n${extractLastName_(targetTeacherName)}先生（${targetMonthKey}）のシフトを変更していただくようお願いします。\nシートの編集が可能になりました。\n\n※編集するには登録したGmailでGoogleにログインしてください。\n変更後、☑（提出）を入れてください。\n${targetUrl}`
       );
     }
 
@@ -1121,6 +1127,137 @@ function registerTeacherManually_(teacherName, email, lineUserId) {
 
   console.log('LINE通知を送信しました');
   return `登録完了: ${teacherName} (LINE通知送信済み)`;
+}
+
+/**
+ * 吉本先生のシフト提出シートを修復する関数（管理者用）
+ * status=createdなのにsheetUrlが空の場合に使用
+ * Google Apps Scriptエディタで直接実行
+ */
+function repairYoshimotoSubmission() {
+  const teacherName = '吉本偉大';
+  const monthKey = '2026-02';
+
+  const master = SpreadsheetApp.openById(CONFIG.MASTER_SPREADSHEET_ID);
+
+  // 講師情報を取得
+  const teacher = findTeacherByName_(master, teacherName);
+  if (!teacher) {
+    console.error(`講師が見つかりません: ${teacherName}`);
+    return `講師が見つかりません: ${teacherName}`;
+  }
+
+  console.log(`講師情報: ${JSON.stringify(teacher)}`);
+
+  const teacherId = teacher.teacherId || '';
+  const lineUserId = teacher.lineUserId || '';
+
+  // 月ごとのテンプレートを検索
+  let templateSpreadsheetId = null;
+  if (CONFIG.TEMPLATE_FOLDER_ID) {
+    templateSpreadsheetId = findTemplateByMonth_(monthKey, CONFIG.TEMPLATE_FOLDER_ID);
+  }
+
+  if (!templateSpreadsheetId) {
+    console.error(`テンプレートが見つかりません: ${monthKey}`);
+    return `テンプレートが見つかりません: ${monthKey}`;
+  }
+
+  console.log(`テンプレートID: ${templateSpreadsheetId}`);
+
+  // 月フォルダ確保 → テンプレコピー
+  const monthFolderId = ensureMonthFolder_(monthKey, CONFIG.COPIES_PARENT_FOLDER_ID);
+  const fileName = `${monthKey}_${teacher.name}_シフト提出`;
+  const newSpreadsheetId = copyTemplateSpreadsheet_(monthFolderId, templateSpreadsheetId, fileName);
+  const sheetUrl = `https://docs.google.com/spreadsheets/d/${newSpreadsheetId}/edit`;
+
+  console.log(`新しいシートを作成しました: ${sheetUrl}`);
+
+  // 「リンクを知っているすべての人」を編集者に設定
+  setAnyoneWithLinkCanEdit_(newSpreadsheetId);
+
+  // _META書き込み
+  const submissionKey = `${monthKey}|${teacherId || normalizeNameKey_(teacher.name)}`;
+  writeMetaToTeacherSheet_(newSpreadsheetId, CONFIG.META_SHEET_NAME, {
+    MASTER_SPREADSHEET_ID: CONFIG.MASTER_SPREADSHEET_ID,
+    SUBMISSIONS_SHEET_NAME: CONFIG.SHEET_SUBMISSIONS,
+    SUBMISSION_KEY: submissionKey,
+    MONTH_KEY: monthKey,
+    TEACHER_ID: teacherId,
+    TEACHER_NAME: teacher.name,
+  });
+
+  // 講師名をG3に直接設定
+  try {
+    const teacherSs = SpreadsheetApp.openById(newSpreadsheetId);
+    const inputSheet = teacherSs.getSheetByName('Input');
+    if (inputSheet) {
+      inputSheet.getRange('G3').setValue(teacher.name);
+    }
+  } catch (e) {
+    console.error('Failed to set teacher name in G3:', e);
+  }
+
+  // Submissionsを更新
+  const existingSubmission = findSubmissionByKey_(master, submissionKey);
+  if (existingSubmission) {
+    updateSubmission_(master, existingSubmission.row, existingSubmission.header, {
+      sheetUrl: sheetUrl,
+      status: 'created',
+    });
+    console.log(`Submissionsを更新しました: row ${existingSubmission.row}`);
+  } else {
+    console.error('既存のSubmissionが見つかりません');
+    return '既存のSubmissionが見つかりません';
+  }
+
+  // LINEにURL送信
+  if (lineUserId) {
+    pushLine_(lineUserId,
+      `【シフト提出URL（${monthKey}）】\n${sheetUrl}\n\n※編集するには登録したGmailでGoogleにログインしてください。\n入力後、☑（提出）を入れてください。`
+    );
+    console.log('LINE通知を送信しました');
+  } else {
+    console.log('LINE User IDが登録されていないため、LINE通知は送信しませんでした');
+  }
+
+  return `修復完了: ${teacher.name} (${monthKey})\nシートURL: ${sheetUrl}`;
+}
+
+/**
+ * 大久保先生に登録完了メッセージを送る関数（管理者用）
+ * Google Apps Scriptエディタで直接実行
+ */
+function sendMessageToOkubo() {
+  const master = SpreadsheetApp.openById(CONFIG.MASTER_SPREADSHEET_ID);
+  const teacher = findTeacherByName_(master, '大久保拓海');
+
+  if (!teacher) {
+    console.error('大久保先生が見つかりません');
+    return '大久保先生が見つかりません';
+  }
+
+  console.log(`大久保先生の情報:`);
+  console.log(`- 氏名: ${teacher.name}`);
+  console.log(`- teacherId: ${teacher.teacherId}`);
+  console.log(`- メール: ${teacher.email || '(未登録)'}`);
+  console.log(`- LINE User ID: ${teacher.lineUserId || '(未登録)'}`);
+
+  if (!teacher.lineUserId) {
+    console.error('大久保先生のLINE User IDが登録されていません');
+    return '大久保先生のLINE User IDが登録されていません';
+  }
+
+  const lastName = extractLastName_(teacher.name);
+  let message = `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}`;
+
+  if (teacher.email) {
+    message += `\n\nメールアドレスを登録しました：${teacher.email}`;
+  }
+
+  pushLine_(teacher.lineUserId, message);
+  console.log('LINE通知を送信しました');
+  return `${lastName}先生にメッセージを送信しました`;
 }
 
 /**

@@ -96,10 +96,10 @@ Teachersシートで講師情報を検索
    - TEACHER_NAME
     ↓
 6. LINE通知（lineUserIdが登録済みの場合）
-   「【シフト提出URL（{月}）】\n{URL}\n\n入力後、☑（提出）を入れてください。」
+   「【シフト提出URL（{月}）】\n{URL}\n\n※編集するには登録したGmailでGoogleにログインしてください。\n入力後、☑（提出）を入れてください。」
 ```
 
-**関数**: `onFormSubmit()` → `findTeacherByName_()`, `ensureMonthFolder_()`, `copyTemplateSpreadsheet_()`, `grantEditPermission_()`, `appendSubmission_()`, `writeMetaToTeacherSheet_()`, `pushLine_()`
+**関数**: `onFormSubmit()` → `findTeacherByName_()`, `ensureMonthFolder_()`, `copyTemplateSpreadsheet_()`, `ensureEditor_()`, `appendSubmission_()`, `writeMetaToTeacherSheet_()`, `pushLine_()`
 
 ---
 
@@ -320,7 +320,7 @@ handleAdminUnlockCommand_() を実行
 4. Submissionsの lockedAt をクリア
     ↓
 5. 講師にLINE通知
-   「【シフト変更依頼】\n{氏名}さん（{月}）のシフトを変更していただくようお願いします。\nシートの編集が可能になりました。\n{URL}」
+   「【シフト変更依頼】\n{氏名}さん（{月}）のシフトを変更していただくようお願いします。\nシートの編集が可能になりました。\n\n※編集するには登録したGmailでGoogleにログインしてください。\n変更後、☑（提出）を入れてください。\n{URL}」
     ↓
 6. 管理者に返信
    「ロック解除しました：{氏名}さん（{月}）」

@@ -26,131 +26,177 @@ function pollSubmissionsAndUpdate() {
     const sh = master.getSheetByName(CONFIG.SHEET_SUBMISSIONS);
     if (!sh) throw new Error('Submissionsが見つかりません');
 
-  const values = sh.getDataRange().getValues();
-  if (values.length < 2) return;
+    const values = sh.getDataRange().getValues();
+    if (values.length < 2) return;
 
-  const header = values[0];
-  const idxUrl = header.indexOf('sheetUrl');
-  const idxStatus = header.indexOf('status');
-  const idxSubmittedAt = header.indexOf('submittedAt');
-  const idxTeacherId = header.indexOf('teacherId');
-  const idxName = header.indexOf('氏名');
-  const idxMonthKey = header.indexOf('monthKey');
-  const idxAck = header.indexOf('ackNotifiedAt');
-  const idxLockedAt = header.indexOf('lockedAt');
+    const header = values[0];
+    const idxUrl = header.indexOf('sheetUrl');
+    const idxStatus = header.indexOf('status');
+    const idxSubmittedAt = header.indexOf('submittedAt');
+    const idxTeacherId = header.indexOf('teacherId');
+    const idxName = header.indexOf('氏名');
+    const idxMonthKey = header.indexOf('monthKey');
+    const idxAck = header.indexOf('ackNotifiedAt');
+    const idxLockedAt = header.indexOf('lockedAt');
 
-  if (idxUrl < 0 || idxStatus < 0 || idxSubmittedAt < 0) {
-    throw new Error('Submissionsに必要列がありません（sheetUrl/status/submittedAt）');
-  }
-  if (idxAck < 0) {
-    throw new Error('Submissionsに ackNotifiedAt 列を追加してください（提出受理LINEの一回送信制御に必要）');
-  }
+    if (idxUrl < 0 || idxStatus < 0 || idxSubmittedAt < 0) {
+      throw new Error('Submissionsに必要列がありません（sheetUrl/status/submittedAt）');
+    }
+    if (idxAck < 0) {
+      throw new Error('Submissionsに ackNotifiedAt 列を追加してください（提出受理LINEの一回送信制御に必要）');
+    }
 
-  for (let r = 1; r < values.length; r++) {
-    // 各レコードの処理を個別にtry-catchで囲む（1つが失敗しても他の処理を続行）
-    try {
+    // パフォーマンス最適化：処理対象のレコードを先にフィルタリング
+    // status='submitted' かつ ackNotifiedAt が設定済みのレコードはスキップ
+    const recordsToCheck = [];
+    for (let r = 1; r < values.length; r++) {
       const status = String(values[r][idxStatus] || '').trim();
-      
       const url = String(values[r][idxUrl] || '').trim();
+      const ackAlready = values[r][idxAck];
+
+      // 既に提出済みでLINE通知も完了している場合はスキップ（最重要の最適化）
+      if (status === 'submitted' && ackAlready) continue;
+
+      // URLがない場合はスキップ
       if (!url) continue;
 
       const id = extractSpreadsheetId_(url);
       if (!id) continue;
 
-      // 講師シートの提出フラグ（エラーハンドリング付き）
-      let submitted = false;
-      try {
-        submitted = readTeacherSubmittedFlag_(id);
-      } catch (e) {
-        console.error(`[pollSubmissionsAndUpdate] Failed to read submission flag for ${id}:`, e);
-        continue; // このスプレッドシートの処理をスキップ
-      }
-      
-      if (!submitted) continue;
+      recordsToCheck.push({
+        rowIndex: r,
+        id: id,
+        url: url,
+        status: status,
+        ackAlready: ackAlready,
+        values: values[r]
+      });
+    }
 
-      // ① Submissions 更新
-      try {
-        sh.getRange(r + 1, idxStatus + 1).setValue('submitted');
-        sh.getRange(r + 1, idxSubmittedAt + 1).setValue(new Date());
-      } catch (e) {
-        console.error(`[pollSubmissionsAndUpdate] Failed to update Submissions row ${r + 1}:`, e);
-        continue; // 更新に失敗した場合は次のレコードへ
-      }
+    console.log(`[pollSubmissionsAndUpdate] 処理対象レコード数: ${recordsToCheck.length}/${values.length - 1}`);
 
-      const teacherId = idxTeacherId >= 0 ? String(values[r][idxTeacherId] || '').trim() : '';
-      const teacherName = idxName >= 0 ? String(values[r][idxName] || '').trim() : '';
-      // monthKeyを適切にフォーマット（Dateオブジェクトの場合は文字列に変換）
-      let monthKey = '';
-      if (idxMonthKey >= 0) {
-        const monthKeyValue = values[r][idxMonthKey];
-        if (monthKeyValue instanceof Date) {
-          // Dateオブジェクトの場合は YYYY-MM 形式に変換
-          const year = monthKeyValue.getFullYear();
-          const month = String(monthKeyValue.getMonth() + 1).padStart(2, '0');
-          monthKey = `${year}-${month}`;
-        } else {
-          monthKey = String(monthKeyValue || '').trim();
+    // 処理対象がない場合は早期リターン
+    if (recordsToCheck.length === 0) return;
+
+    for (const record of recordsToCheck) {
+      const r = record.rowIndex;
+      const id = record.id;
+
+      // 各レコードの処理を個別にtry-catchで囲む（1つが失敗しても他の処理を続行）
+      try {
+        // 既に提出済み（status='submitted'）の場合は、LINE通知の処理のみ行う
+        if (record.status === 'submitted') {
+          // ackNotifiedAtが未設定の場合のみLINE通知を送信
+          if (!record.ackAlready) {
+            const teacherId = idxTeacherId >= 0 ? String(record.values[idxTeacherId] || '').trim() : '';
+            const teacherName = idxName >= 0 ? String(record.values[idxName] || '').trim() : '';
+            const monthKey = formatMonthKey_(record.values[idxMonthKey]);
+
+            try {
+              const lineUserId = getTeacherLineUserId_(master, teacherId, teacherName);
+              if (lineUserId) {
+                const lastName = extractLastName_(teacherName);
+                pushLine_(lineUserId, `【提出受理】\n${lastName}先生（${monthKey}）のシフト提出を受け付けました。ありがとうございます！`);
+                sh.getRange(r + 1, idxAck + 1).setValue(new Date());
+              }
+            } catch (e) {
+              console.error(`[pollSubmissionsAndUpdate] Failed to send LINE notification for ${teacherName}:`, e);
+            }
+          }
+          continue;
         }
-      }
 
-      // ② 講師シートの表示も更新（任意：B2を提出済に）
-      let teacherEmail = '';
-      try {
-        const ss = SpreadsheetApp.openById(id);
-        const input = ss.getSheetByName('Input');
-        if (input) input.getRange('B2').setValue('提出済');
-        
-        // 講師のメールアドレスを取得（ロック用）
-        const teacher = getTeacherInfo_(master, teacherId, teacherName);
-        teacherEmail = teacher ? teacher.email || '' : '';
-      } catch (e) {
-        console.error(`[pollSubmissionsAndUpdate] Failed to update teacher sheet ${id}:`, e);
-        // シートの更新に失敗しても続行
-      }
-
-      // ③ シートをロック（提出後は編集不可）
-      const alreadyLocked = idxLockedAt >= 0 && values[r][idxLockedAt];
-      if (!alreadyLocked && teacherEmail) {
+        // 講師シートの提出フラグをチェック（エラーハンドリング付き）
+        let submitted = false;
         try {
-          const locked = lockTeacherSheet_(id, teacherEmail);
-          if (locked && idxLockedAt >= 0) {
-            sh.getRange(r + 1, idxLockedAt + 1).setValue(new Date());
+          submitted = readTeacherSubmittedFlag_(id);
+        } catch (e) {
+          console.error(`[pollSubmissionsAndUpdate] Failed to read submission flag for ${id}:`, e);
+          continue; // このスプレッドシートの処理をスキップ
+        }
+
+        if (!submitted) continue;
+
+        // ① Submissions 更新
+        const now = new Date();
+        try {
+          sh.getRange(r + 1, idxStatus + 1).setValue('submitted');
+          sh.getRange(r + 1, idxSubmittedAt + 1).setValue(now);
+        } catch (e) {
+          console.error(`[pollSubmissionsAndUpdate] Failed to update Submissions row ${r + 1}:`, e);
+          continue; // 更新に失敗した場合は次のレコードへ
+        }
+
+        const teacherId = idxTeacherId >= 0 ? String(record.values[idxTeacherId] || '').trim() : '';
+        const teacherName = idxName >= 0 ? String(record.values[idxName] || '').trim() : '';
+        const monthKey = formatMonthKey_(record.values[idxMonthKey]);
+
+        // ② 講師シートの表示も更新（任意：B2を提出済に）
+        let teacherEmail = '';
+        try {
+          const ss = SpreadsheetApp.openById(id);
+          const input = ss.getSheetByName('Input');
+          if (input) input.getRange('B2').setValue('提出済');
+
+          // 講師のメールアドレスを取得（ロック用）
+          const teacher = getTeacherInfo_(master, teacherId, teacherName);
+          teacherEmail = teacher ? teacher.email || '' : '';
+        } catch (e) {
+          console.error(`[pollSubmissionsAndUpdate] Failed to update teacher sheet ${id}:`, e);
+          // シートの更新に失敗しても続行
+        }
+
+        // ③ シートをロック（提出後は編集不可）
+        const alreadyLocked = idxLockedAt >= 0 && record.values[idxLockedAt];
+        if (!alreadyLocked && teacherEmail) {
+          try {
+            const locked = lockTeacherSheet_(id, teacherEmail);
+            if (locked && idxLockedAt >= 0) {
+              sh.getRange(r + 1, idxLockedAt + 1).setValue(now);
+            }
+          } catch (e) {
+            console.error(`[pollSubmissionsAndUpdate] Failed to lock sheet ${id}:`, e);
+            // ロックに失敗しても続行（通知は送る）
+          }
+        }
+
+        // ④ 提出受理LINE通知
+        try {
+          const lineUserId = getTeacherLineUserId_(master, teacherId, teacherName);
+          if (lineUserId) {
+            const lastName = extractLastName_(teacherName);
+            pushLine_(lineUserId, `【提出受理】\n${lastName}先生（${monthKey}）のシフト提出を受け付けました。ありがとうございます！`);
+            sh.getRange(r + 1, idxAck + 1).setValue(now);
           }
         } catch (e) {
-          console.error(`[pollSubmissionsAndUpdate] Failed to lock sheet ${id}:`, e);
-          // ロックに失敗しても続行（通知は送る）
+          console.error(`[pollSubmissionsAndUpdate] Failed to send LINE notification for ${teacherName}:`, e);
+          // LINE通知に失敗しても続行
         }
+      } catch (err) {
+        // 個々のレコード処理で予期しないエラーが発生した場合
+        console.error(`[pollSubmissionsAndUpdate] Unexpected error processing row ${r + 1}:`, err);
+        // 次のレコードの処理を続行
+        continue;
       }
-
-      // ④ 提出受理LINE（初回提出時、または再提出時にも送信）
-      // ackNotifiedAtをチェック（既に通知済みの場合はスキップ）
-      const ackAlready = values[r][idxAck];
-      
-      // 既に通知済みの場合はスキップ（重複通知を防ぐ）
-      // 再提出の場合でも、ackNotifiedAtが既に設定されていれば通知済みとして扱う
-      if (ackAlready) continue;
-
-      try {
-        const lineUserId = getTeacherLineUserId_(master, teacherId, teacherName);
-        if (lineUserId) {
-          const lastName = extractLastName_(teacherName);
-          pushLine_(lineUserId, `【提出受理】\n${lastName}先生（${monthKey}）のシフト提出を受け付けました。ありがとうございます！`);
-          sh.getRange(r + 1, idxAck + 1).setValue(new Date());
-        }
-      } catch (e) {
-        console.error(`[pollSubmissionsAndUpdate] Failed to send LINE notification for ${teacherName}:`, e);
-        // LINE通知に失敗しても続行
-      }
-    } catch (err) {
-      // 個々のレコード処理で予期しないエラーが発生した場合
-      console.error(`[pollSubmissionsAndUpdate] Unexpected error processing row ${r + 1}:`, err);
-      // 次のレコードの処理を続行
-      continue;
     }
-  }
   } catch (err) {
     handleError_(err, 'pollSubmissionsAndUpdate');
   }
+}
+
+/**
+ * monthKeyをYYYY-MM形式にフォーマット
+ * @param {any} monthKeyValue - monthKeyの値（Dateまたは文字列）
+ * @returns {string} YYYY-MM形式の文字列
+ */
+function formatMonthKey_(monthKeyValue) {
+  if (!monthKeyValue) return '';
+  if (monthKeyValue instanceof Date) {
+    const year = monthKeyValue.getFullYear();
+    const month = String(monthKeyValue.getMonth() + 1).padStart(2, '0');
+    return `${year}-${month}`;
+  }
+  return String(monthKeyValue || '').trim();
 }
 
 /** 講師用シートの Input!C2 が TRUE なら提出済み */
@@ -390,8 +436,8 @@ function getMonthStartDate_(monthKey) {
 
 /**
  * 前月の未提出者を処理（毎月1日に実行）
- * @param {SpreadsheetApp.Spreadsheet} master - マスタースプレッドシート
- * @param {SpreadsheetApp.Sheet} sh - Submissionsシート
+ * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} master - マスタースプレッドシート
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sh - Submissionsシート
  * @param {Array} values - Submissionsシートの全データ
  * @param {Array} header - ヘッダー行
  * @param {string} prevMonthKey - 前月の月キー
@@ -504,7 +550,7 @@ function handlePreviousMonthUnapplied_(master, sh, values, header, prevMonthKey,
 
 /**
  * 未提出者にLINEリマインド通知を送信
- * @param {SpreadsheetApp.Spreadsheet} master - マスタースプレッドシート
+ * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} master - マスタースプレッドシート
  * @param {Array} unappliedList - 未提出者リスト
  * @param {string} monthKey - 月キー
  */
@@ -534,7 +580,7 @@ function sendUnappliedReminderToTeachers_(master, unappliedList, monthKey) {
 
 /**
  * 全講師に来月のシフト申請依頼をLINE通知
- * @param {SpreadsheetApp.Spreadsheet} master - マスタースプレッドシート
+ * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} master - マスタースプレッドシート
  * @param {string} nextMonthKey - 来月の月キー
  * @returns {Object} 通知結果（notifiedCount, notifiedTeachers）
  */
@@ -593,7 +639,7 @@ function notifyAllTeachersAboutNextMonthShift_(master, nextMonthKey) {
 
 /**
  * 全講師のSubmissionsエントリを作成（テンプレート確認時に実行）
- * @param {SpreadsheetApp.Spreadsheet} master - マスタースプレッドシート
+ * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} master - マスタースプレッドシート
  * @param {string} monthKey - 月キー
  */
 function createSubmissionsForAllTeachers_(master, monthKey) {
@@ -638,8 +684,12 @@ function createSubmissionsForAllTeachers_(master, monthKey) {
       // submissionKeyを生成
       const submissionKey = `${monthKey}|${teacherId || normalizeNameKey_(teacherName)}`;
 
-      // 既存エントリをチェック
-      const existing = findSubmissionByKey_(master, submissionKey);
+      // 既存エントリをチェック（submissionKeyと、monthKey+teacherId/氏名の両方で検索）
+      let existing = findSubmissionByKey_(master, submissionKey);
+      if (!existing) {
+        // submissionKeyで見つからない場合、monthKeyとteacherId/氏名の組み合わせで検索
+        existing = findSubmissionByMonthAndTeacher_(master, monthKey, teacherId, teacherName);
+      }
       if (existing) {
         skippedCount++;
         continue; // 既に存在する場合はスキップ
@@ -669,8 +719,8 @@ function createSubmissionsForAllTeachers_(master, monthKey) {
 
 /**
  * 3週間前のテンプレート確認処理（来月のみ、午後3時）
- * @param {SpreadsheetApp.Spreadsheet} master - マスタースプレッドシート
- * @param {SpreadsheetApp.Sheet} sh - Submissionsシート
+ * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} master - マスタースプレッドシート
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sh - Submissionsシート
  * @param {Array} values - Submissionsシートの全データ
  * @param {Array} header - ヘッダー行
  * @param {string} nextMonthKey - 来月の月キー

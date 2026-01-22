@@ -300,7 +300,7 @@ function findScriptIdBySpreadsheetId_(spreadsheetId) {
     // Apps Script APIを使用して、すべてのプロジェクトを取得
     const url = 'https://script.googleapis.com/v1/projects';
     const response = UrlFetchApp.fetch(url, {
-      method: 'GET',
+      method: 'get',
       headers: {
         'Authorization': 'Bearer ' + accessToken
       }
@@ -321,7 +321,7 @@ function findScriptIdBySpreadsheetId_(spreadsheetId) {
         // プロジェクトのメタデータを取得
         const projectUrl = `https://script.googleapis.com/v1/projects/${project.scriptId}`;
         const projectResponse = UrlFetchApp.fetch(projectUrl, {
-          method: 'GET',
+          method: 'get',
           headers: {
             'Authorization': 'Bearer ' + accessToken
           }
@@ -883,7 +883,7 @@ function getScriptIdForSpreadsheet_(spreadsheetId) {
       // より効率的な方法は、スクリプトプロパティにマッピングを保存することです
       const url = 'https://script.googleapis.com/v1/projects';
       const response = UrlFetchApp.fetch(url, {
-        method: 'GET',
+        method: 'get',
         headers: {
           'Authorization': 'Bearer ' + accessToken
         }
@@ -993,7 +993,7 @@ function deployTemplateSideCodeToSpreadsheet_(spreadsheetId, scriptId = null) {
     // 既存のコードを取得
     const getUrl = `https://script.googleapis.com/v1/projects/${targetScriptId}/content`;
     const getResponse = UrlFetchApp.fetch(getUrl, {
-      method: 'GET',
+      method: 'get',
       headers: {
         'Authorization': 'Bearer ' + accessToken
       }
@@ -1041,7 +1041,7 @@ function deployTemplateSideCodeToSpreadsheet_(spreadsheetId, scriptId = null) {
     // 新しいコードで更新
     const updateUrl = `https://script.googleapis.com/v1/projects/${targetScriptId}/content`;
     const updateResponse = UrlFetchApp.fetch(updateUrl, {
-      method: 'PUT',
+      method: 'put',
       headers: {
         'Authorization': 'Bearer ' + accessToken,
         'Content-Type': 'application/json'

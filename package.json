@@ -1,0 +1,12 @@
+{
+  "name": "my-gas-project",
+  "version": "1.0.0",
+  "description": "Google Apps Script project",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.0",
+    "@types/google-apps-script": "^1.0.83"
+  }
+}

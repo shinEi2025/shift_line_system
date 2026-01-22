@@ -480,17 +480,33 @@ function onFormSubmit(e) {
 
     const teacher = findTeacherByName_(master, teacherNameRaw);
     if (!teacher) {
-      appendSubmission_(master, {
-        timestamp: new Date(),
-        monthKey,
-        teacherId: '',
-        name: teacherNameRaw,
-        sheetUrl: '',
-        status: 'teacher_not_found',
-        lastNotified: '',
-        submissionKey: `${monthKey}|${normalizeNameKey_(teacherNameRaw)}`,
-        submittedAt: '',
-      });
+      // 講師が見つからない場合でも、既存のsubmissionがあれば更新する（重複防止）
+      const submissionKeyNotFound = `${monthKey}|${normalizeNameKey_(teacherNameRaw)}`;
+      let existingNotFound = findSubmissionByKey_(master, submissionKeyNotFound);
+      if (!existingNotFound) {
+        existingNotFound = findSubmissionByMonthAndTeacher_(master, monthKey, '', teacherNameRaw);
+      }
+
+      if (existingNotFound) {
+        // 既存エントリを更新
+        updateSubmission_(master, existingNotFound.row, existingNotFound.header, {
+          timestamp: new Date(),
+          status: 'teacher_not_found',
+        });
+      } else {
+        // 新規エントリを作成
+        appendSubmission_(master, {
+          timestamp: new Date(),
+          monthKey,
+          teacherId: '',
+          name: teacherNameRaw,
+          sheetUrl: '',
+          status: 'teacher_not_found',
+          lastNotified: '',
+          submissionKey: submissionKeyNotFound,
+          submittedAt: '',
+        });
+      }
       return;
     }
 
@@ -501,8 +517,15 @@ function onFormSubmit(e) {
 
     // Submissionsに記録（既存エントリがあれば更新、なければ新規作成）
     const submissionKey = `${monthKey}|${teacherId || normalizeNameKey_(teacherName)}`;
-    const existingSubmission = findSubmissionByKey_(master, submissionKey);
-    
+
+    // 既存のsubmissionを検索（submissionKeyで検索、見つからなければmonthKeyとteacherId/氏名で検索）
+    // これにより、submissionKeyの生成方式が異なる場合でも重複を防げる
+    let existingSubmission = findSubmissionByKey_(master, submissionKey);
+    if (!existingSubmission) {
+      // submissionKeyで見つからない場合、monthKeyとteacherId/氏名の組み合わせで検索
+      existingSubmission = findSubmissionByMonthAndTeacher_(master, monthKey, teacherId, teacherName);
+    }
+
     // 既存のsubmissionがあり、かつsheetUrlが存在する場合は、新しいシートを作成せず既存のシートを使用
     let newSpreadsheetId = null;
     let sheetUrl = '';
@@ -638,7 +661,7 @@ function onFormSubmit(e) {
 
 /**
  * 管理者からの「henshin」単独コマンド：最新の提出済みシートをロック解除
- * @param {SpreadsheetApp.Spreadsheet} masterSs - マスタースプレッドシート
+ * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} masterSs - マスタースプレッドシート
  * @returns {Object} {handled: boolean, message: string}
  */
 function handleAdminUnlockLatest_(masterSs) {
@@ -805,7 +828,7 @@ function parseUnlockCommand_(command) {
 
 /**
  * 再提出のためSubmissionsをリセット
- * @param {SpreadsheetApp.Sheet} sh - Submissionsシート
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sh - Submissionsシート
  * @param {number} row - 行番号
  * @param {Object} indices - 列インデックス
  */
@@ -842,7 +865,7 @@ function resetTeacherSheetForResubmit_(spreadsheetId) {
 /**
  * 管理者からのロック解除コマンドを処理
  * コマンド形式: "変更依頼: 講師名 月" または "変更依頼: 講師名"
- * @param {SpreadsheetApp.Spreadsheet} masterSs - マスタースプレッドシート
+ * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} masterSs - マスタースプレッドシート
  * @param {string} command - コマンド文字列
  * @returns {Object} {handled: boolean, message: string}
  */

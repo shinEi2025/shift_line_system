@@ -350,7 +350,7 @@ function isGmailAddress_(email) {
 
 /**
  * 次のTeacher IDを取得（自動採番）
- * @param {SpreadsheetApp.Spreadsheet} masterSs - マスタースプレッドシート
+ * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} masterSs - マスタースプレッドシート
  * @returns {string} 次のTeacher ID（例：T027）
  */
 function getNextTeacherId_(masterSs) {
@@ -453,7 +453,7 @@ function addTeacherManually(teacherName, email = '') {
 
 /**
  * Teachersシートに新規講師を追加
- * @param {SpreadsheetApp.Spreadsheet} masterSs - マスタースプレッドシート
+ * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} masterSs - マスタースプレッドシート
  * @param {string} teacherName - 講師氏名
  * @param {string} lineUserId - LINE User ID
  * @param {string} email - メールアドレス（任意）
@@ -594,7 +594,7 @@ function findTeacherByName_(masterSs, teacherNameRaw) {
 
 /**
  * LINE User IDで講師を検索
- * @param {SpreadsheetApp.Spreadsheet} masterSs - マスタースプレッドシート
+ * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} masterSs - マスタースプレッドシート
  * @param {string} lineUserId - LINE User ID
  * @returns {Object|null} 講師情報（name, email, teacherId, lineUserId, row）またはnull
  */
@@ -717,7 +717,7 @@ function linkLineUserByName_(masterSs, nameKey, userId) {
 
 /**
  * Teachersシートのメールアドレスを更新
- * @param {SpreadsheetApp.Spreadsheet} masterSs - マスタースプレッドシート
+ * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} masterSs - マスタースプレッドシート
  * @param {number} row - 行番号（1ベース）
  * @param {string} email - メールアドレス
  * @returns {boolean} 更新成功かどうか
@@ -767,10 +767,82 @@ function findSubmissionByKey_(masterSs, submissionKey) {
   return null;
 }
 
+/**
+ * Submissionsに既存エントリがあるかチェック（monthKeyとteacherId/氏名で検索）
+ * submissionKeyの生成方式が異なる場合でも、同じ講師・同じ月のエントリを見つけられる
+ * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} masterSs - マスタースプレッドシート
+ * @param {string} monthKey - 月キー（YYYY-MM形式）
+ * @param {string} teacherId - 講師ID（任意）
+ * @param {string} teacherName - 講師氏名（任意）
+ * @returns {Object|null} 見つかった場合は{row, header, sheetUrl, status, submissionKey}、なければnull
+ */
+function findSubmissionByMonthAndTeacher_(masterSs, monthKey, teacherId, teacherName) {
+  const sh = masterSs.getSheetByName(CONFIG.SHEET_SUBMISSIONS);
+  if (!sh) return null;
+
+  const values = sh.getDataRange().getValues();
+  if (values.length < 2) return null;
+
+  const header = values[0];
+  const idxMonthKey = header.indexOf('monthKey');
+  const idxTeacherId = header.indexOf('teacherId');
+  const idxName = header.indexOf('氏名');
+  const idxSheetUrl = header.indexOf('sheetUrl');
+  const idxStatus = header.indexOf('status');
+  const idxSubmissionKey = header.indexOf('submissionKey');
+
+  if (idxMonthKey < 0) return null;
+
+  const normalizedMonthKey = normalizeMonthKey_(monthKey);
+  const teacherNameKey = normalizeNameKey_(teacherName || '');
+
+  for (let r = 1; r < values.length; r++) {
+    const rowMonthKey = normalizeMonthKey_(values[r][idxMonthKey]);
+    if (rowMonthKey !== normalizedMonthKey) continue;
+
+    const rowTeacherId = idxTeacherId >= 0 ? String(values[r][idxTeacherId] || '').trim() : '';
+    const rowName = idxName >= 0 ? String(values[r][idxName] || '').trim() : '';
+    const rowNameKey = normalizeNameKey_(rowName);
+
+    // teacherIdで一致、または氏名で一致
+    const idMatch = teacherId && rowTeacherId && teacherId === rowTeacherId;
+    const nameMatch = teacherNameKey && rowNameKey && teacherNameKey === rowNameKey;
+
+    if (idMatch || nameMatch) {
+      return {
+        row: r + 1,
+        header: header,
+        sheetUrl: idxSheetUrl >= 0 ? String(values[r][idxSheetUrl] || '').trim() : '',
+        status: idxStatus >= 0 ? String(values[r][idxStatus] || '').trim() : '',
+        submissionKey: idxSubmissionKey >= 0 ? String(values[r][idxSubmissionKey] || '').trim() : ''
+      };
+    }
+  }
+  return null;
+}
+
+/** 有効なstatus値 */
+const VALID_STATUSES = ['created', 'submitted', 'teacher_not_found', 'template_not_found', ''];
+
+/**
+ * statusの値を検証
+ * @param {string} status - ステータス値
+ * @returns {boolean} 有効なステータスかどうか
+ */
+function isValidStatus_(status) {
+  return VALID_STATUSES.includes(status);
+}
+
 /** Submissionsの既存エントリを更新（ヘッダー名ベース） */
 function updateSubmission_(masterSs, row, header, obj) {
   const sh = masterSs.getSheetByName(CONFIG.SHEET_SUBMISSIONS);
   if (!sh) throw new Error(`マスターにシート "${CONFIG.SHEET_SUBMISSIONS}" がありません`);
+
+  // statusのバリデーション
+  if (obj.status !== undefined && !isValidStatus_(obj.status)) {
+    console.error(`[updateSubmission_] Invalid status value: "${obj.status}" for row ${row}. Valid values: ${VALID_STATUSES.join(', ')}`);
+    throw new Error(`Invalid status value: "${obj.status}"`);
+  }
 
   for (let i = 0; i < header.length; i++) {
     const colName = header[i];
@@ -798,6 +870,12 @@ function updateSubmission_(masterSs, row, header, obj) {
 function appendSubmission_(masterSs, obj) {
   const sh = masterSs.getSheetByName(CONFIG.SHEET_SUBMISSIONS);
   if (!sh) throw new Error(`マスターにシート "${CONFIG.SHEET_SUBMISSIONS}" がありません`);
+
+  // statusのバリデーション
+  if (obj.status && !isValidStatus_(obj.status)) {
+    console.error(`[appendSubmission_] Invalid status value: "${obj.status}". Valid values: ${VALID_STATUSES.join(', ')}`);
+    throw new Error(`Invalid status value: "${obj.status}"`);
+  }
 
   const values = sh.getDataRange().getValues();
   if (values.length < 1) throw new Error('Submissionsのヘッダー行がありません');
@@ -880,7 +958,7 @@ function isSameJstDate_(a, b) {
 
 /**
  * Teachersから講師情報を取得（teacherIdまたは氏名で検索）
- * @param {SpreadsheetApp.Spreadsheet} masterSs - マスタースプレッドシート
+ * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} masterSs - マスタースプレッドシート
  * @param {string} teacherId - 講師ID（任意）
  * @param {string} teacherName - 講師氏名（任意）
  * @returns {Object|null} 講師情報（name, email, teacherId, lineUserId）またはnull
@@ -1038,7 +1116,7 @@ function isChecked_(value) {
 
 /**
  * 休職中の講師名リストを取得
- * @param {SpreadsheetApp.Spreadsheet} master - マスタースプレッドシート
+ * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} master - マスタースプレッドシート
  * @returns {Set<string>} 休職中の講師名のSet
  */
 function getOnLeaveTeachers_(master) {
@@ -1222,7 +1300,7 @@ function formatSubmissionListMessage_(unappliedList, submittedList, monthKey) {
 
 /**
  * ReminderSettingsシートからリマインダー設定を読み込む
- * @param {SpreadsheetApp.Spreadsheet} masterSs - マスタースプレッドシート
+ * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} masterSs - マスタースプレッドシート
  * @returns {Array} リマインダー設定の配列
  */
 function getReminderSettings_(masterSs) {

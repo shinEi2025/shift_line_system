@@ -95,16 +95,14 @@ function exchangeAuthorizationCode(code) {
     'redirect_uri': redirectUri,
     'grant_type': 'authorization_code'
   };
-  
-  var options = {
-    'method': 'post',
-    'contentType': 'application/x-www-form-urlencoded',
-    'payload': Object.keys(payload).map(function(key) {
+
+  var response = UrlFetchApp.fetch('https://accounts.google.com/o/oauth2/token', {
+    method: 'post',
+    contentType: 'application/x-www-form-urlencoded',
+    payload: Object.keys(payload).map(function(key) {
       return encodeURIComponent(key) + '=' + encodeURIComponent(payload[key]);
     }).join('&')
-  };
-  
-  var response = UrlFetchApp.fetch('https://accounts.google.com/o/oauth2/token', options);
+  });
   var result = JSON.parse(response.getContentText());
   
   if (result.error) {
@@ -137,16 +135,14 @@ function refreshAccessToken(refreshToken) {
     'client_secret': CLIENT_SECRET,
     'grant_type': 'refresh_token'
   };
-  
-  var options = {
-    'method': 'post',
-    'contentType': 'application/x-www-form-urlencoded',
-    'payload': Object.keys(payload).map(function(key) {
+
+  var response = UrlFetchApp.fetch('https://accounts.google.com/o/oauth2/token', {
+    method: 'post',
+    contentType: 'application/x-www-form-urlencoded',
+    payload: Object.keys(payload).map(function(key) {
       return encodeURIComponent(key) + '=' + encodeURIComponent(payload[key]);
     }).join('&')
-  };
-  
-  var response = UrlFetchApp.fetch('https://accounts.google.com/o/oauth2/token', options);
+  });
   var result = JSON.parse(response.getContentText());
   
   if (result.error) {
@@ -168,7 +164,7 @@ function refreshAccessToken(refreshToken) {
 /**
  * OAuth2認証コールバックのハンドラー（Code.jsのdoGet()から呼び出される）
  * @param {Object} e リクエストパラメータ
- * @return {HtmlOutput} HTML出力
+ * @return {GoogleAppsScript.HTML.HtmlOutput} HTML出力
  */
 function handleOAuthCallback_(e) {
   try {
@@ -191,7 +187,7 @@ function handleOAuthCallback_(e) {
 
 /**
  * OAuth認証ページを表示（Code.jsのdoGet()から呼び出される）
- * @return {HtmlOutput} HTML出力
+ * @return {GoogleAppsScript.HTML.HtmlOutput} HTML出力
  */
 function showOAuthPage_() {
   try {

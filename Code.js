@@ -285,9 +285,23 @@ function doPost(e) {
             continue;
           }
         } else {
-          // メールアドレスが含まれていない場合、既に完全登録済みでない限り無視
-          // （既に完全登録済みの場合は上でcontinueされている）
-          continue; // 無視（エラーメッセージを送らない）
+          // メールアドレスが含まれていない場合
+          // 名前が2文字以上なら、名前を保存してメールアドレスを要求する
+          const teacherName = extractedName || textRaw.trim();
+          if (teacherName && teacherName.length >= 2 && looksLikeName_(teacherName)) {
+            // 名前だけ送信された場合、名前を一時保存してメールアドレスを要求
+            const newTeacher = addNewTeacher_(master, teacherName, userId, '');
+            const lastName = extractLastName_(newTeacher.name);
+            const props = PropertiesService.getScriptProperties();
+            props.setProperty(`EMAIL_REQUEST_${userId}`, JSON.stringify({
+              name: newTeacher.name,
+              timestamp: new Date().getTime()
+            }));
+            replyLine_(replyToken, `${lastName}先生、Gmailアドレスを登録してください。\nGmailアドレスを送信してください。\n例：example@gmail.com`);
+            continue;
+          }
+          // 名前として認識できない場合は無視
+          continue;
         }
       }
 
@@ -1345,6 +1359,19 @@ function sendShiftRequestToNewTeachers() {
   }
 
   return results.join('\n');
+}
+
+/**
+ * 吉本先生に登録完了メッセージを送る関数（管理者用）
+ * Google Apps Scriptエディタで直接実行
+ */
+function sendMessageToYoshimoto() {
+  const lineUserId = 'U6a3995aafcc36c0a275b9621f70ca7a2';
+  const email = 'jibenxingda8@gmail.com';
+  const message = `登録OK：吉本先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}\n\nメールアドレスを登録しました：${email}`;
+  pushLine_(lineUserId, message);
+  console.log('吉本先生にメッセージを送信しました');
+  return '吉本先生にメッセージを送信しました';
 }
 
 /**

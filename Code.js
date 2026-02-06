@@ -552,8 +552,11 @@ function onFormSubmit(e) {
       // 既存エントリを更新（再送信の場合はackNotifiedAtをクリアして再提出受理通知を送れるようにする）
       updateSubmission_(master, existingSubmission.row, existingSubmission.header, {
         timestamp: new Date(), // フォーム送信日時で更新
+        teacherId: teacherId, // teacherIdを正しい値に更新
+        name: teacherName,
         sheetUrl: sheetUrl,
         status: 'created', // シート作成済みに更新
+        submissionKey: submissionKey, // submissionKeyを正しい値に更新
         ackNotifiedAt: '', // 再送信時はackNotifiedAtをクリア（再提出受理通知を送るため）
       });
     } else {
@@ -579,7 +582,10 @@ function onFormSubmit(e) {
         if (existingSubmission) {
           updateSubmission_(master, existingSubmission.row, existingSubmission.header, {
             timestamp: new Date(),
+            teacherId: teacherId, // teacherIdを正しい値に更新
+            name: teacherName,
             status: 'template_not_found',
+            submissionKey: submissionKey, // submissionKeyを正しい値に更新
           });
         } else {
           appendSubmission_(master, {
@@ -611,8 +617,11 @@ function onFormSubmit(e) {
         // 既存エントリを更新
         updateSubmission_(master, existingSubmission.row, existingSubmission.header, {
           timestamp: new Date(), // フォーム送信日時で更新
+          teacherId: teacherId, // teacherIdを正しい値に更新
+          name: teacherName,
           sheetUrl: sheetUrl,
           status: 'created', // シート作成済みに更新
+          submissionKey: submissionKey, // submissionKeyを正しい値に更新
           ackNotifiedAt: '', // 再送信時はackNotifiedAtをクリア（再提出受理通知を送るため）
         });
       } else {

@@ -188,6 +188,99 @@ function doPost(e) {
         }
       }
 
+      // 機種変更+メール未登録の確認待ち状態を処理
+      const deviceChangeKey = `DEVICE_CHANGE_${userId}`;
+      const deviceChangeData = props.getProperty(deviceChangeKey);
+      if (deviceChangeData) {
+        try {
+          const changeInfo = JSON.parse(deviceChangeData);
+          const dcEmail = extractEmail_(textRaw);
+
+          if (isStateExpired_(changeInfo.timestamp)) {
+            props.deleteProperty(deviceChangeKey);
+          } else if (dcEmail && isGmailAddress_(dcEmail)) {
+            // Gmailアドレス受信 → lineUserId + メールを更新
+            const sh = master.getSheetByName(CONFIG.SHEET_TEACHERS);
+            const header = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+            const idxLine = header.indexOf('lineUserId');
+            const idxLinkedAt = header.indexOf('lineLinkedAt');
+            const idxEmailCol = header.indexOf('メール');
+
+            if (idxLine >= 0 && changeInfo.row) {
+              sh.getRange(changeInfo.row, idxLine + 1).setValue(userId);
+              if (idxLinkedAt >= 0) sh.getRange(changeInfo.row, idxLinkedAt + 1).setValue(new Date());
+              if (idxEmailCol >= 0) sh.getRange(changeInfo.row, idxEmailCol + 1).setValue(dcEmail);
+
+              const lastName = extractLastName_(changeInfo.name);
+              replyLine_(replyToken, `${lastName}先生、LINE IDとGmailアドレスを更新しました。登録完了です。`);
+              if (adminLineUserId) {
+                pushLine_(adminLineUserId, `【機種変更完了】${changeInfo.name}さんのLINE IDとメールアドレスが更新されました。\nメール: ${dcEmail}`);
+              }
+            } else {
+              replyLine_(replyToken, `エラーが発生しました。管理者に連絡してください。`);
+            }
+            props.deleteProperty(deviceChangeKey);
+            continue;
+          } else if (dcEmail && !isGmailAddress_(dcEmail)) {
+            // Gmail以外 → 再度Gmail要求
+            replyLine_(replyToken, `GmailアドレスのみGoogleスプレッドシートの編集に使えます。\nGmailアドレス（@gmail.com）を送ってください。`);
+            continue;
+          } else {
+            // メールなし → Gmailを要求
+            replyLine_(replyToken, `Gmailアドレスを送ってください（例：xxx@gmail.com）`);
+            continue;
+          }
+        } catch (e) {
+          console.error('Device change processing error:', e);
+          props.deleteProperty(deviceChangeKey);
+        }
+      }
+
+      // 同名複数一致の確認待ち状態を処理
+      const multipleMatchKey = `MULTIPLE_MATCH_${userId}`;
+      const multipleMatchData = props.getProperty(multipleMatchKey);
+      if (multipleMatchData) {
+        try {
+          const matchInfo = JSON.parse(multipleMatchData);
+          const mmEmail = extractEmail_(textRaw);
+
+          if (isStateExpired_(matchInfo.timestamp)) {
+            props.deleteProperty(multipleMatchKey);
+          } else if (mmEmail && isValidEmail_(mmEmail)) {
+            // メールアドレス受信 → candidates から一致する email を探す
+            const matched = (matchInfo.candidates || []).find(c => c.email && c.email.toLowerCase() === mmEmail.toLowerCase());
+            if (matched) {
+              // 一致あり → lineUserId を更新
+              const sh = master.getSheetByName(CONFIG.SHEET_TEACHERS);
+              const header = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+              const idxLine = header.indexOf('lineUserId');
+              const idxLinkedAt = header.indexOf('lineLinkedAt');
+
+              if (idxLine >= 0 && matched.row) {
+                sh.getRange(matched.row, idxLine + 1).setValue(userId);
+                if (idxLinkedAt >= 0) sh.getRange(matched.row, idxLinkedAt + 1).setValue(new Date());
+                const lastName = extractLastName_(matched.name);
+                replyLine_(replyToken, `${lastName}先生、登録が完了しました。`);
+              } else {
+                replyLine_(replyToken, `エラーが発生しました。管理者に連絡してください。`);
+              }
+            } else {
+              // 一致なし
+              replyLine_(replyToken, `メールアドレスが一致しません。管理者に連絡してください。`);
+            }
+            props.deleteProperty(multipleMatchKey);
+            continue;
+          } else {
+            // メールなし → Gmailアドレスを要求
+            replyLine_(replyToken, `Gmailアドレスを送ってください（例：xxx@gmail.com）`);
+            continue;
+          }
+        } catch (e) {
+          console.error('Multiple match processing error:', e);
+          props.deleteProperty(multipleMatchKey);
+        }
+      }
+
       // 「講師登録」プレフィックスのチェック
       const registrationPrefix = '講師登録';
       const hasRegistrationPrefix = textRaw.trim().startsWith(registrationPrefix);
@@ -292,11 +385,13 @@ function doPost(e) {
             // 名前だけ送信された場合、名前を一時保存してメールアドレスを要求
             const newTeacher = addNewTeacher_(master, teacherName, userId, '');
             const lastName = extractLastName_(newTeacher.name);
-            const props = PropertiesService.getScriptProperties();
             props.setProperty(`EMAIL_REQUEST_${userId}`, JSON.stringify({
               name: newTeacher.name,
               timestamp: new Date().getTime()
             }));
+            if (adminLineUserId) {
+              pushLine_(adminLineUserId, `【新規LINE登録】${newTeacher.name}さんが新規登録しました（メール未登録）`);
+            }
             replyLine_(replyToken, `${lastName}先生、Gmailアドレスを登録してください。\nGmailアドレスを送信してください。\n例：example@gmail.com`);
             continue;
           }
@@ -306,10 +401,14 @@ function doPost(e) {
       }
 
       if (result.status === 'multiple') {
+        props.setProperty(`MULTIPLE_MATCH_${userId}`, JSON.stringify({
+          candidates: result.candidatesWithInfo,
+          timestamp: new Date().getTime()
+        }));
         replyLine_(
           replyToken,
-          `同じ氏名が複数います（候補：${result.candidates.join(' / ')}）\n` +
-          `フルネームをそのまま送ってください（空白は気にしなくてOK）。`
+          `同じ名前の講師が複数います（${result.candidates.join(' / ')}）\n` +
+          `識別のため、登録済みのGmailアドレスを送ってください。`
         );
         continue;
       }
@@ -318,30 +417,68 @@ function doPost(e) {
         // 別のLINE IDが登録されている場合
         const currentEmail = result.email || '';
         const lastName = extractLastName_(result.name);
-        
-        // メールアドレスが含まれている場合、メールアドレスで確認
+
         if (extractedEmail && isValidEmail_(extractedEmail)) {
           if (currentEmail && currentEmail === extractedEmail) {
-            // メールアドレスが一致 → LINE IDを更新（アカウント変更の可能性）
+            // currentEmail あり + 一致 → LINE ID 更新（自動再リンク）
             const sh = master.getSheetByName(CONFIG.SHEET_TEACHERS);
             const header = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
             const idxLine = header.indexOf('lineUserId');
             const idxLinkedAt = header.indexOf('lineLinkedAt');
-            
+
             if (idxLine >= 0 && result.row) {
               sh.getRange(result.row, idxLine + 1).setValue(userId);
               if (idxLinkedAt >= 0) sh.getRange(result.row, idxLinkedAt + 1).setValue(new Date());
-              
-              replyLine_(
-                replyToken,
-                `新しいシステムが導入されました。\nアカウントを変更しましたか？再登録しました：${lastName}先生`
-              );
+              replyLine_(replyToken, `新しいシステムが導入されました。\nアカウントを変更しましたか？再登録しました：${lastName}先生`);
               continue;
             }
+          } else if (!currentEmail) {
+            // currentEmail なし → email 登録 + LINE ID 更新 + 管理者通知
+            const sh = master.getSheetByName(CONFIG.SHEET_TEACHERS);
+            const header = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+            const idxLine = header.indexOf('lineUserId');
+            const idxLinkedAt = header.indexOf('lineLinkedAt');
+            const idxEmailCol = header.indexOf('メール');
+
+            if (idxLine >= 0 && result.row) {
+              sh.getRange(result.row, idxLine + 1).setValue(userId);
+              if (idxLinkedAt >= 0) sh.getRange(result.row, idxLinkedAt + 1).setValue(new Date());
+              if (idxEmailCol >= 0 && isGmailAddress_(extractedEmail)) {
+                sh.getRange(result.row, idxEmailCol + 1).setValue(extractedEmail);
+              }
+              replyLine_(replyToken, `${lastName}先生、登録が完了しました。`);
+              if (adminLineUserId) {
+                pushLine_(adminLineUserId, `【LINE ID更新】${result.name}さんのLINE IDが更新されました（メール: ${extractedEmail}）`);
+              }
+              continue;
+            }
+          } else {
+            // currentEmail あり + 不一致 → 教室に連絡を促す
+            replyLine_(replyToken, `この氏名は別のLINEと紐付いています：${result.name}\n教室まで連絡してください。`);
+            continue;
+          }
+        } else {
+          // extractedEmail なし
+          if (!currentEmail) {
+            // currentEmail なし → DEVICE_CHANGE 状態セット + 管理者通知 + email 要求
+            props.setProperty(`DEVICE_CHANGE_${userId}`, JSON.stringify({
+              name: result.name,
+              row: result.row,
+              timestamp: new Date().getTime()
+            }));
+            if (adminLineUserId) {
+              pushLine_(adminLineUserId, `【要確認】${result.name}さんが名前だけを送信しました（別のLINE IDが登録済み、メール未登録）。機種変更の可能性あり。`);
+            }
+            replyLine_(replyToken, `${lastName}先生、確認のためGmailアドレスを送ってください（例：xxx@gmail.com）`);
+            continue;
+          } else {
+            // currentEmail あり → Gmailアドレスを送るよう案内
+            replyLine_(replyToken, `この氏名は別のLINEと紐付いています：${result.name}\n機種変更の場合は登録済みのGmailアドレスを送ってください。`);
+            continue;
           }
         }
-        
-        // メールアドレスが一致しない、または含まれていない場合
+
+        // フォールバック（通常は到達しない）
         replyLine_(replyToken, `この氏名は別のLINEと紐付いています：${result.name}\n教室まで連絡してください。`);
         continue;
       }
@@ -389,9 +526,21 @@ function doPost(e) {
           replyLine_(replyToken, `既に登録済みです：${lastName}先生`);
           continue;
         } else {
-          // メールアドレスが含まれていない場合、既に登録済みと返す
+          // メールアドレスが含まれていない場合
           const lastName = extractLastName_(result.name);
-          replyLine_(replyToken, `既に登録済みです：${lastName}先生`);
+          if (!currentEmail) {
+            // メール未登録 → EMAIL_REQUEST をセット
+            props.setProperty(`EMAIL_REQUEST_${userId}`, JSON.stringify({
+              name: result.name,
+              timestamp: new Date().getTime()
+            }));
+            replyLine_(replyToken,
+              `${lastName}先生、登録済みですがGmailアドレスがまだ登録されていません。\n` +
+              `Gmailアドレスを送ってください（例：xxx@gmail.com）`
+            );
+          } else {
+            replyLine_(replyToken, `既に登録済みです：${lastName}先生`);
+          }
           continue;
         }
       }
@@ -520,6 +669,13 @@ function onFormSubmit(e) {
           submissionKey: submissionKeyNotFound,
           submittedAt: '',
         });
+      }
+      // 管理者通知
+      const adminIdF = PropertiesService.getScriptProperties().getProperty('ADMIN_LINE_USER_ID') || '';
+      if (adminIdF) {
+        pushLine_(adminIdF,
+          `【要確認】「${teacherNameRaw}」という名前でシフト申請フォームが送信されましたが、Teachersに登録がありません。`
+        );
       }
       return;
     }
@@ -668,9 +824,36 @@ function onFormSubmit(e) {
     // LINEにURL送信（新しいシートの場合のみ、登録済みのみ）
     // 既存のsubmissionがあり、既存のシートを使用する場合は、LINE通知を送信しない（重複通知を防ぐ）
     if (lineUserId && (!existingSubmission || !existingSubmission.sheetUrl || !existingSubmission.sheetUrl.trim())) {
-      pushLine_(lineUserId,
-        `【シフト提出URL（${monthKey}）】\n${sheetUrl}\n\n※編集するには登録したGmailでGoogleにログインしてください。\n入力後、☑（提出）を入れてください。`
-      );
+      if (!teacherEmail) {
+        // H: メール未登録 → URL と一緒にメール登録を促す
+        const propsH = PropertiesService.getScriptProperties();
+        propsH.setProperty(`EMAIL_REQUEST_${lineUserId}`, JSON.stringify({
+          name: teacherName,
+          timestamp: new Date().getTime()
+        }));
+        pushLine_(lineUserId,
+          `【シフト提出URL（${monthKey}）】\n${sheetUrl}\n\n` +
+          `※Gmailアドレスがまだ登録されていません。続けてGmailアドレスを送ってください。`
+        );
+        const adminIdH = propsH.getProperty('ADMIN_LINE_USER_ID') || '';
+        if (adminIdH) {
+          pushLine_(adminIdH,
+            `【メール未登録】${teacherName}先生がシフト申請しましたが、Gmailアドレスが未登録です。LINE通知は送信済みです。`
+          );
+        }
+      } else {
+        pushLine_(lineUserId,
+          `【シフト提出URL（${monthKey}）】\n${sheetUrl}\n\n※編集するには登録したGmailでGoogleにログインしてください。\n入力後、☑（提出）を入れてください。`
+        );
+      }
+    } else if (!lineUserId && (!existingSubmission || !existingSubmission.sheetUrl || !existingSubmission.sheetUrl.trim())) {
+      // G: lineUserId なし → 管理者通知
+      const adminIdG = PropertiesService.getScriptProperties().getProperty('ADMIN_LINE_USER_ID') || '';
+      if (adminIdG) {
+        pushLine_(adminIdG,
+          `【要確認】${teacherName}先生がシフト申請フォームを送信しましたが、LINE IDが未登録のためURLを送れませんでした。\nURL: ${sheetUrl}`
+        );
+      }
     }
 
   } catch (err) {

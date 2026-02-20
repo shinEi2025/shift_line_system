@@ -694,7 +694,11 @@ function linkLineUserByName_(masterSs, nameKey, userId) {
   const hits = exactHits.length > 0 ? exactHits : partialHits;
 
   if (hits.length === 0) return { status: 'not_found' };
-  if (hits.length >= 2) return { status: 'multiple', candidates: hits.map(h => h.name) };
+  if (hits.length >= 2) return {
+    status: 'multiple',
+    candidates: hits.map(h => h.name),
+    candidatesWithInfo: hits.map(h => ({ name: h.name, email: h.currentEmail, row: h.row }))
+  };
 
   const target = hits[0];
 

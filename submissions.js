@@ -682,7 +682,7 @@ function createSubmissionsForAllTeachers_(master, monthKey) {
       const lineUserId = idxLine >= 0 ? String(teachersValues[r][idxLine] || '').trim() : '';
 
       // submissionKeyを生成
-      const submissionKey = `${monthKey}|${teacherId || normalizeNameKey_(teacherName)}`;
+      const submissionKey = `${monthKey}-${teacherId || normalizeNameKey_(teacherName)}`;
 
       // 既存エントリをチェック（submissionKeyと、monthKey+teacherId/氏名の両方で検索）
       let existing = findSubmissionByKey_(master, submissionKey);
@@ -1039,7 +1039,7 @@ function repairSubmissionKeys() {
   for (let r = 1; r < values.length; r++) {
     const name = String(values[r][idxName] || '').trim();
     const currentTeacherId = String(values[r][idxTeacherId] || '').trim();
-    const monthKey = String(values[r][idxMonthKey] || '').trim();
+    const monthKey = normalizeMonthKey_(values[r][idxMonthKey]);
     const currentSubmissionKey = String(values[r][idxSubmissionKey] || '').trim();
 
     if (!name || !monthKey) continue;
@@ -1047,7 +1047,7 @@ function repairSubmissionKeys() {
     const teacher = teacherMap[normalizeNameKey_(name)];
     if (!teacher) continue;
 
-    const correctSubmissionKey = `${monthKey}|${teacher.teacherId}`;
+    const correctSubmissionKey = `${monthKey}-${teacher.teacherId}`;
 
     if (!currentTeacherId || currentSubmissionKey !== correctSubmissionKey) {
       updateSubmission_(master, r + 1, header, {

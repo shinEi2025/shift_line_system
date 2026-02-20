@@ -495,7 +495,7 @@ function onFormSubmit(e) {
     const teacher = findTeacherByName_(master, teacherNameRaw);
     if (!teacher) {
       // 講師が見つからない場合でも、既存のsubmissionがあれば更新する（重複防止）
-      const submissionKeyNotFound = `${monthKey}|${normalizeNameKey_(teacherNameRaw)}`;
+      const submissionKeyNotFound = `${monthKey}-${normalizeNameKey_(teacherNameRaw)}`;
       let existingNotFound = findSubmissionByKey_(master, submissionKeyNotFound);
       if (!existingNotFound) {
         existingNotFound = findSubmissionByMonthAndTeacher_(master, monthKey, '', teacherNameRaw);
@@ -530,7 +530,7 @@ function onFormSubmit(e) {
     const lineUserId = teacher.lineUserId || '';
 
     // Submissionsに記録（既存エントリがあれば更新、なければ新規作成）
-    const submissionKey = `${monthKey}|${teacherId || normalizeNameKey_(teacherName)}`;
+    const submissionKey = `${monthKey}-${teacherId || normalizeNameKey_(teacherName)}`;
 
     // 既存のsubmissionを検索（submissionKeyで検索、見つからなければmonthKeyとteacherId/氏名で検索）
     // これにより、submissionKeyの生成方式が異なる場合でも重複を防げる
@@ -1223,7 +1223,7 @@ function repairYoshimotoSubmission() {
   setAnyoneWithLinkCanEdit_(newSpreadsheetId);
 
   // _META書き込み
-  const submissionKey = `${monthKey}|${teacherId || normalizeNameKey_(teacher.name)}`;
+  const submissionKey = `${monthKey}-${teacherId || normalizeNameKey_(teacher.name)}`;
   writeMetaToTeacherSheet_(newSpreadsheetId, CONFIG.META_SHEET_NAME, {
     MASTER_SPREADSHEET_ID: CONFIG.MASTER_SPREADSHEET_ID,
     SUBMISSIONS_SHEET_NAME: CONFIG.SHEET_SUBMISSIONS,

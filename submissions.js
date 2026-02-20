@@ -296,14 +296,14 @@ function remindUnappliedToManager() {
         submissionList: submissionListText
       });
 
-      // 管理者に通知（manager または both の場合）
-      if ((matchedReminder.targetAudience === 'manager' || matchedReminder.targetAudience === 'both') &&
+      // 管理者に通知（manager の場合）
+      if (matchedReminder.targetAudience === 'manager' &&
           (unappliedList.length > 0 || (matchedReminder.daysBeforeDeadline === 0 && appliedList.length > 0))) {
         pushLine_(adminLineUserId, message.trim());
       }
 
-      // 講師に通知（teacher または both の場合）
-      if ((matchedReminder.targetAudience === 'teacher' || matchedReminder.targetAudience === 'both') && unappliedList.length > 0) {
+      // 講師に通知（teacher の場合）
+      if (matchedReminder.targetAudience === 'teacher' && unappliedList.length > 0) {
         sendUnappliedReminderToTeachers_(master, unappliedList, targetMonth);
       }
     }
@@ -691,8 +691,16 @@ function createSubmissionsForAllTeachers_(master, monthKey) {
         existing = findSubmissionByMonthAndTeacher_(master, monthKey, teacherId, teacherName);
       }
       if (existing) {
+        // teacherIdが確定しているのにsubmissionKeyが名前ベース（不正）の場合は更新
+        if (teacherId && existing.submissionKey !== submissionKey) {
+          updateSubmission_(master, existing.row, existing.header, {
+            teacherId: teacherId,
+            submissionKey: submissionKey,
+          });
+          console.log(`Submission修正: ${teacherName} (${existing.submissionKey} → ${submissionKey})`);
+        }
         skippedCount++;
-        continue; // 既に存在する場合はスキップ
+        continue;
       }
 
       // 新規エントリを作成
@@ -982,4 +990,75 @@ function testUrlFetchPermission() {
   const response = UrlFetchApp.fetch('https://www.google.com', { muteHttpExceptions: true });
   console.log('UrlFetchApp permission test: Status ' + response.getResponseCode());
   SpreadsheetApp.getActiveSpreadsheet().toast('UrlFetchApp権限が正常に機能しています', '権限テスト', 3);
+}
+
+/**
+ * 【手動実行用】SubmissionsのteacherIdとsubmissionKeyを一括修復
+ * teacherIdが空またはsubmissionKeyが名前ベースの行をTeachersシートの情報で修正する
+ */
+function repairSubmissionKeys() {
+  const master = SpreadsheetApp.openById(CONFIG.MASTER_SPREADSHEET_ID);
+
+  // Teachersシートから講師名→teacherIdのマップを作成
+  const teachersSh = master.getSheetByName(CONFIG.SHEET_TEACHERS);
+  if (!teachersSh) throw new Error('Teachersシートが見つかりません');
+
+  const teachersValues = teachersSh.getDataRange().getValues();
+  const teachersHeader = teachersValues[0];
+  const tIdxName = teachersHeader.indexOf('氏名');
+  const tIdxTeacherId = teachersHeader.indexOf('teacherId');
+
+  if (tIdxName < 0 || tIdxTeacherId < 0) throw new Error('Teachersに「氏名」または「teacherId」列がありません');
+
+  const teacherMap = {};
+  for (let r = 1; r < teachersValues.length; r++) {
+    const name = String(teachersValues[r][tIdxName] || '').trim();
+    const id = String(teachersValues[r][tIdxTeacherId] || '').trim();
+    if (name && id) {
+      teacherMap[normalizeNameKey_(name)] = { name, teacherId: id };
+    }
+  }
+
+  // Submissionsシートを処理
+  const subSh = master.getSheetByName(CONFIG.SHEET_SUBMISSIONS);
+  if (!subSh) throw new Error('Submissionsシートが見つかりません');
+
+  const values = subSh.getDataRange().getValues();
+  const header = values[0];
+  const idxName = header.indexOf('氏名');
+  const idxTeacherId = header.indexOf('teacherId');
+  const idxMonthKey = header.indexOf('monthKey');
+  const idxSubmissionKey = header.indexOf('submissionKey');
+
+  if (idxName < 0 || idxTeacherId < 0 || idxMonthKey < 0 || idxSubmissionKey < 0) {
+    throw new Error('Submissionsに必要列がありません（氏名/teacherId/monthKey/submissionKey）');
+  }
+
+  let updatedCount = 0;
+
+  for (let r = 1; r < values.length; r++) {
+    const name = String(values[r][idxName] || '').trim();
+    const currentTeacherId = String(values[r][idxTeacherId] || '').trim();
+    const monthKey = String(values[r][idxMonthKey] || '').trim();
+    const currentSubmissionKey = String(values[r][idxSubmissionKey] || '').trim();
+
+    if (!name || !monthKey) continue;
+
+    const teacher = teacherMap[normalizeNameKey_(name)];
+    if (!teacher) continue;
+
+    const correctSubmissionKey = `${monthKey}|${teacher.teacherId}`;
+
+    if (!currentTeacherId || currentSubmissionKey !== correctSubmissionKey) {
+      updateSubmission_(master, r + 1, header, {
+        teacherId: teacher.teacherId,
+        submissionKey: correctSubmissionKey,
+      });
+      console.log(`修復: 行${r + 1} ${name} (${currentSubmissionKey} → ${correctSubmissionKey})`);
+      updatedCount++;
+    }
+  }
+
+  console.log(`修復完了: ${updatedCount}件更新`);
+  return `修復完了: ${updatedCount}件更新`;
 }

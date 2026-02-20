@@ -1355,10 +1355,14 @@ function getDefaultReminderSettings_() {
     { id: 'initial_request', type: '初回申請依頼', daysBeforeDeadline: 21, targetAudience: 'teacher', enabled: true, messageTemplate: '【シフト申請のお願い】\n{name}先生、{monthKey}のシフト申請をお願いします。' },
     { id: 'reminder_2weeks', type: '2週間前リマインド', daysBeforeDeadline: 14, targetAudience: 'manager', enabled: true, messageTemplate: '【シフト未提出リマインド（{monthKey}）】\n{monthKey}のシフト提出期限まで2週間です。\n\n{submissionList}' },
     { id: 'reminder_10days', type: '10日前リマインド', daysBeforeDeadline: 10, targetAudience: 'manager', enabled: true, messageTemplate: '【シフト未提出リマインド（{monthKey}）】\n{monthKey}のシフト提出期限まで10日です。\n\n{submissionList}' },
-    { id: 'reminder_1week', type: '1週間前リマインド', daysBeforeDeadline: 7, targetAudience: 'both', enabled: true, messageTemplate: '【シフト未提出リマインド（{monthKey}）】\n{monthKey}のシフト提出期限まで1週間です。\n\n{submissionList}' },
-    { id: 'reminder_3days', type: '3日前リマインド', daysBeforeDeadline: 3, targetAudience: 'both', enabled: true, messageTemplate: '【シフト未提出リマインド（{monthKey}）】\n{monthKey}のシフト提出期限まで3日です。\n\n{submissionList}' },
-    { id: 'reminder_1day', type: '1日前リマインド', daysBeforeDeadline: 1, targetAudience: 'both', enabled: true, messageTemplate: '【シフト未提出リマインド（{monthKey}）】\n{monthKey}のシフト提出期限は明日です。\n\n{submissionList}' },
-    { id: 'deadline_day', type: '締切日', daysBeforeDeadline: 0, targetAudience: 'both', enabled: true, messageTemplate: '【シフト提出状況（{monthKey}）】\n本日が{monthKey}のシフト提出期限です。\n\n{submissionList}' },
+    { id: 'reminder_1week_teacher', type: '1週間前リマインド', daysBeforeDeadline: 7, targetAudience: 'teacher', enabled: true, messageTemplate: '【シフト未提出リマインド（{monthKey}）】\n{name}先生、{monthKey}のシフト提出期限まで1週間です。' },
+    { id: 'reminder_1week_manager', type: '1週間前リマインド', daysBeforeDeadline: 7, targetAudience: 'manager', enabled: true, messageTemplate: '【シフト未提出リマインド（{monthKey}）】\n{monthKey}のシフト未提出者をお知らせします。\n\n{submissionList}' },
+    { id: 'reminder_3days_teacher', type: '3日前リマインド', daysBeforeDeadline: 3, targetAudience: 'teacher', enabled: true, messageTemplate: '【シフト未提出リマインド（{monthKey}）】\n{name}先生、{monthKey}のシフト提出期限まで3日です。至急、提出をお願いします！' },
+    { id: 'reminder_3days_manager', type: '3日前リマインド', daysBeforeDeadline: 3, targetAudience: 'manager', enabled: true, messageTemplate: '【シフト未提出リマインド（{monthKey}）】\n{monthKey}のシフト未提出者をお知らせします。\n\n{submissionList}' },
+    { id: 'reminder_1day_teacher', type: '1日前リマインド', daysBeforeDeadline: 1, targetAudience: 'teacher', enabled: true, messageTemplate: '【シフト未提出リマインド（{monthKey}）】\n{name}先生、{monthKey}のシフト提出期限は明日です。至急、提出をお願いします！' },
+    { id: 'reminder_1day_manager', type: '1日前リマインド', daysBeforeDeadline: 1, targetAudience: 'manager', enabled: true, messageTemplate: '【シフト未提出リマインド（{monthKey}）】\n{monthKey}のシフト未提出者をお知らせします。\n\n{submissionList}' },
+    { id: 'deadline_day_teacher', type: '締切日', daysBeforeDeadline: 0, targetAudience: 'teacher', enabled: true, messageTemplate: '【シフト提出状況（{monthKey}）】\n{name}先生、本日が{monthKey}のシフト提出期限です。至急、提出をお願いします！' },
+    { id: 'deadline_day_manager', type: '締切日', daysBeforeDeadline: 0, targetAudience: 'manager', enabled: true, messageTemplate: '【シフト提出状況（{monthKey}）】\n{monthKey}のシフト未提出者をお知らせします。\n\n{submissionList}' },
   ];
 }
 
@@ -1387,10 +1391,14 @@ function initializeReminderSettingsSheet() {
     ['initial_request', '初回申請依頼', 21, 'teacher', true, '【シフト申請のお願い】\n{name}先生、{monthKey}のシフト申請をお願いします。', '来月のシフト申請を依頼（3週間前）'],
     ['reminder_2weeks', '2週間前リマインド', 14, 'manager', true, '【シフト未提出リマインド（{monthKey}）】\n{monthKey}のシフト提出期限まで2週間です。\n\n{submissionList}', '管理者へ未提出者リスト通知'],
     ['reminder_10days', '10日前リマインド', 10, 'manager', true, '【シフト未提出リマインド（{monthKey}）】\n{monthKey}のシフト提出期限まで10日です。\n\n{submissionList}', '管理者へ未提出者リスト通知'],
-    ['reminder_1week', '1週間前リマインド', 7, 'both', true, '【シフト未提出リマインド（{monthKey}）】\n{monthKey}のシフト提出期限まで1週間です。\n\n{submissionList}', '管理者＋講師へリマインド'],
-    ['reminder_3days', '3日前リマインド', 3, 'both', true, '【シフト未提出リマインド（{monthKey}）】\n{monthKey}のシフト提出期限まで3日です。\n\n{submissionList}', '管理者＋講師へリマインド'],
-    ['reminder_1day', '1日前リマインド', 1, 'both', true, '【シフト未提出リマインド（{monthKey}）】\n{monthKey}のシフト提出期限は明日です。\n\n{submissionList}', '管理者＋講師へリマインド'],
-    ['deadline_day', '締切日', 0, 'both', true, '【シフト提出状況（{monthKey}）】\n本日が{monthKey}のシフト提出期限です。\n\n{submissionList}', '締切当日の通知'],
+    ['reminder_1week_teacher', '1週間前リマインド', 7, 'teacher', true, '【シフト未提出リマインド（{monthKey}）】\n{name}先生、{monthKey}のシフト提出期限まで1週間です。', '講師へリマインド'],
+    ['reminder_1week_manager', '1週間前リマインド', 7, 'manager', true, '【シフト未提出リマインド（{monthKey}）】\n{monthKey}のシフト未提出者をお知らせします。\n\n{submissionList}', '管理者へ未提出者リスト通知'],
+    ['reminder_3days_teacher', '3日前リマインド', 3, 'teacher', true, '【シフト未提出リマインド（{monthKey}）】\n{name}先生、{monthKey}のシフト提出期限まで3日です。至急、提出をお願いします！', '講師へリマインド'],
+    ['reminder_3days_manager', '3日前リマインド', 3, 'manager', true, '【シフト未提出リマインド（{monthKey}）】\n{monthKey}のシフト未提出者をお知らせします。\n\n{submissionList}', '管理者へ未提出者リスト通知'],
+    ['reminder_1day_teacher', '1日前リマインド', 1, 'teacher', true, '【シフト未提出リマインド（{monthKey}）】\n{name}先生、{monthKey}のシフト提出期限は明日です。至急、提出をお願いします！', '講師へリマインド'],
+    ['reminder_1day_manager', '1日前リマインド', 1, 'manager', true, '【シフト未提出リマインド（{monthKey}）】\n{monthKey}のシフト未提出者をお知らせします。\n\n{submissionList}', '管理者へ未提出者リスト通知'],
+    ['deadline_day_teacher', '締切日', 0, 'teacher', true, '【シフト提出状況（{monthKey}）】\n{name}先生、本日が{monthKey}のシフト提出期限です。至急、提出をお願いします！', '講師へ締切当日通知'],
+    ['deadline_day_manager', '締切日', 0, 'manager', true, '【シフト提出状況（{monthKey}）】\n{monthKey}のシフト未提出者をお知らせします。\n\n{submissionList}', '管理者へ締切当日通知'],
   ];
 
   sh.getRange(2, 1, defaultData.length, defaultData[0].length).setValues(defaultData);
@@ -1409,7 +1417,7 @@ function initializeReminderSettingsSheet() {
 
   // データ入力規則（targetAudience列）
   const targetRule = SpreadsheetApp.newDataValidation()
-    .requireValueInList(['manager', 'teacher', 'both'], true)
+    .requireValueInList(['manager', 'teacher'], true)
     .build();
   sh.getRange(2, 4, defaultData.length, 1).setDataValidation(targetRule);
 

@@ -549,12 +549,12 @@ function doPost(e) {
         // 新規登録の場合
         const lastName = extractLastName_(result.name);
         const currentEmail = result.email || '';
-        
+
         // メールアドレスが含まれている場合
         if (extractedEmail && isValidEmail_(extractedEmail)) {
           if (currentEmail && currentEmail === extractedEmail) {
-            // メールアドレスが既に登録済み → 既に登録済みと返す
-            replyLine_(replyToken, `既に登録済みです：${lastName}先生`);
+            // 初回LINE登録完了（メールアドレスは既に登録済み）
+            replyLine_(replyToken, `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}`);
             continue;
           } else if (currentEmail && currentEmail !== extractedEmail) {
             // メールアドレスが違う場合、確認を求める
@@ -1564,6 +1564,42 @@ function sendMessageToYoshimoto() {
   pushLine_(lineUserId, message);
   console.log('吉本先生にメッセージを送信しました');
   return '吉本先生にメッセージを送信しました';
+}
+
+/**
+ * 佐藤翔斗先生に登録完了メッセージを送る関数（管理者用）
+ * Google Apps Scriptエディタで直接実行
+ */
+function sendMessageToSato() {
+  const master = SpreadsheetApp.openById(CONFIG.MASTER_SPREADSHEET_ID);
+  const teacher = findTeacherByName_(master, '佐藤翔斗');
+
+  if (!teacher) {
+    console.error('佐藤先生が見つかりません');
+    return '佐藤先生が見つかりません';
+  }
+
+  console.log(`佐藤先生の情報:`);
+  console.log(`- 氏名: ${teacher.name}`);
+  console.log(`- teacherId: ${teacher.teacherId}`);
+  console.log(`- メール: ${teacher.email || '(未登録)'}`);
+  console.log(`- LINE User ID: ${teacher.lineUserId || '(未登録)'}`);
+
+  if (!teacher.lineUserId) {
+    console.error('佐藤先生のLINE User IDが登録されていません');
+    return '佐藤先生のLINE User IDが登録されていません';
+  }
+
+  const lastName = extractLastName_(teacher.name);
+  let message = `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}`;
+
+  if (teacher.email) {
+    message += `\n\nメールアドレスを登録しました：${teacher.email}`;
+  }
+
+  pushLine_(teacher.lineUserId, message);
+  console.log(`${lastName}先生にメッセージを送信しました`);
+  return `${lastName}先生にメッセージを送信しました`;
 }
 
 /**

@@ -274,37 +274,40 @@ function remindUnappliedToManager() {
       const monthStart = getMonthStartDate_(targetMonth);
       if (!monthStart) continue;
 
-      // 今日該当するリマインダー設定を検索（初回申請依頼以外）
-      const matchedReminder = reminderSettings.find(setting => {
+      // 今日該当するリマインダー設定を全て検索（初回申請依頼以外）
+      // find() → filter() に変更：同日に管理者向け・講師向けが両方ある場合も全件処理する
+      const matchedReminders = reminderSettings.filter(setting => {
         if (setting.id === 'initial_request') return false; // 初回申請依頼は別処理
         return isReminderDay_(today, monthStart, setting.daysBeforeDeadline);
       });
 
-      if (!matchedReminder) continue; // 今日はリマインド日ではない
+      if (matchedReminders.length === 0) continue; // 今日はリマインド日ではない
 
-      console.log(`リマインダー該当: ${matchedReminder.id} (${targetMonth})`);
-
-      // 対象月の未提出者と提出済み者を取得
+      // 対象月の未提出者と提出済み者を取得（ループ外で1回だけ取得）
       const { unappliedList, appliedList } = getSubmissionLists_(values, idxMonthKey, idxStatus, idxName, idxTeacherId, idxUrl, targetMonth, onLeaveTeachers);
 
-      // 未提出者リストのテキストを生成
-      const submissionListText = formatSubmissionListForReminder_(unappliedList, appliedList, matchedReminder.daysBeforeDeadline === 0);
+      for (const matchedReminder of matchedReminders) {
+        console.log(`リマインダー該当: ${matchedReminder.id} (${targetMonth})`);
 
-      // メッセージテンプレートを置換
-      const message = replaceMessageVariables_(matchedReminder.messageTemplate, {
-        monthKey: targetMonth,
-        submissionList: submissionListText
-      });
+        // 未提出者リストのテキストを生成
+        const submissionListText = formatSubmissionListForReminder_(unappliedList, appliedList, matchedReminder.daysBeforeDeadline === 0);
 
-      // 管理者に通知（manager の場合）
-      if (matchedReminder.targetAudience === 'manager' &&
-          (unappliedList.length > 0 || (matchedReminder.daysBeforeDeadline === 0 && appliedList.length > 0))) {
-        pushLine_(adminLineUserId, message.trim());
-      }
+        // メッセージテンプレートを置換
+        const message = replaceMessageVariables_(matchedReminder.messageTemplate, {
+          monthKey: targetMonth,
+          submissionList: submissionListText
+        });
 
-      // 講師に通知（teacher の場合）
-      if (matchedReminder.targetAudience === 'teacher' && unappliedList.length > 0) {
-        sendUnappliedReminderToTeachers_(master, unappliedList, targetMonth);
+        // 管理者に通知（manager の場合）
+        if (matchedReminder.targetAudience === 'manager' &&
+            (unappliedList.length > 0 || (matchedReminder.daysBeforeDeadline === 0 && appliedList.length > 0))) {
+          pushLine_(adminLineUserId, message.trim());
+        }
+
+        // 講師に通知（teacher の場合）
+        if (matchedReminder.targetAudience === 'teacher' && unappliedList.length > 0) {
+          sendUnappliedReminderToTeachers_(master, unappliedList, targetMonth);
+        }
       }
     }
   } catch (err) {

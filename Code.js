@@ -28,6 +28,18 @@ function doGet(e) {
     return showOAuthPage_();
   }
 
+  // 初回通知の即時送信（action=sendInitial, secret=ADMIN_LINE_USER_ID）
+  if (e && e.parameter && e.parameter.action === 'sendInitial') {
+    const secret = e.parameter.secret || '';
+    const adminLineUserId = PropertiesService.getScriptProperties().getProperty('ADMIN_LINE_USER_ID') || '';
+    if (secret && adminLineUserId && secret === adminLineUserId) {
+      const monthKey = e.parameter.month || ''; // 省略時は来月
+      const result = sendInitialShiftRequestNow(monthKey);
+      return ContentService.createTextOutput(result);
+    }
+    return ContentService.createTextOutput('Unauthorized');
+  }
+
   // 通常のヘルスチェック
   return ContentService.createTextOutput('OK');
 }

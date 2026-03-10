@@ -737,14 +737,16 @@ function createSubmissionsForAllTeachers_(master, monthKey) {
  * @param {string} nextMonthKey - 来月の月キー
  * @param {number} idxMonthKey - monthKey列のインデックス
  * @param {string} adminLineUserId - 管理者のLINE User ID
+ * @param {boolean} skipTimeCheck - trueの場合は15時チェックをスキップ（手動実行用）
  */
-function checkTemplateThreeWeeksBefore_(master, sh, values, header, nextMonthKey, idxMonthKey, adminLineUserId) {
+function checkTemplateThreeWeeksBefore_(master, sh, values, header, nextMonthKey, idxMonthKey, adminLineUserId, skipTimeCheck) {
   try {
     const today = new Date();
     const currentHour = today.getHours();
-    
-    // 午後3時（15時）でない場合はスキップ
-    if (currentHour !== 15) {
+
+    // 午後3時（15時）でない場合はスキップ（skipTimeCheckがtrueの場合は無視）
+    if (!skipTimeCheck && currentHour !== 15) {
+      console.log(`15時チェック: 現在${currentHour}時のためスキップ`);
       return;
     }
     
@@ -981,6 +983,110 @@ function sendInitialShiftRequestManually() {
     handleError_(err, 'sendInitialShiftRequestManually');
     return 'エラーが発生しました: ' + (err.message || String(err));
   }
+}
+
+/**
+ * 【手動実行用】来月のシフト申請依頼を全講師に即時送信（フラグをリセット）
+ * GASエディタから直接実行可能
+ * TEMPLATE_READYフラグをリセットしてから送信するため、確実に通知が送られる
+ * @param {string} targetMonthKey - 対象月（省略時は来月）
+ */
+function sendInitialShiftRequestNow(targetMonthKey) {
+  try {
+    const master = SpreadsheetApp.openById(CONFIG.MASTER_SPREADSHEET_ID);
+    const monthKey = targetMonthKey || getNextMonthKey_();
+    const props = PropertiesService.getScriptProperties();
+
+    // テンプレートの存在確認
+    const templateFolderId = CONFIG.TEMPLATE_FOLDER_ID;
+    if (!templateFolderId) {
+      console.log('TEMPLATE_FOLDER_IDが未設定です');
+      return 'エラー: TEMPLATE_FOLDER_IDが未設定です';
+    }
+
+    const templateSpreadsheetId = findTemplateByMonth_(monthKey, templateFolderId);
+    if (!templateSpreadsheetId) {
+      console.log(`${monthKey}のテンプレートが見つかりません`);
+      return `エラー: ${monthKey}のテンプレートが見つかりません`;
+    }
+
+    // TEMPLATE_READYフラグをリセット（強制的に通知を送るため）
+    const templateReadyKey = `TEMPLATE_READY_${monthKey}`;
+    const previousFlag = props.getProperty(templateReadyKey);
+    if (previousFlag) {
+      console.log(`TEMPLATE_READY_${monthKey} フラグをリセットします（以前の値: ${previousFlag}）`);
+      props.deleteProperty(templateReadyKey);
+    }
+
+    // 全講師にLINE通知を送信
+    const result = notifyAllTeachersAboutNextMonthShift_(master, monthKey);
+
+    // 全講師のSubmissionsエントリを作成
+    createSubmissionsForAllTeachers_(master, monthKey);
+
+    // TEMPLATE_READYフラグを設定
+    props.setProperty(templateReadyKey, 'true');
+
+    // 管理者に結果を報告
+    const adminLineUserId = props.getProperty('ADMIN_LINE_USER_ID');
+    if (adminLineUserId) {
+      let adminMessage = `【シフト申請依頼の送信結果（即時送信）】\n${monthKey}のシフト申請依頼を送信しました。\n\n`;
+      if (result.notifiedCount > 0) {
+        adminMessage += `通知した講師（${result.notifiedCount}名）：\n`;
+        result.notifiedTeachers.forEach((name, index) => {
+          adminMessage += `${index + 1}. ${name}\n`;
+        });
+      } else {
+        adminMessage += `LINE User IDが登録されている講師がいませんでした。`;
+      }
+      pushLine_(adminLineUserId, adminMessage);
+    }
+
+    console.log(`初回通知送信完了: ${result.notifiedCount}名`);
+    console.log(`通知した講師: ${result.notifiedTeachers.join(', ')}`);
+
+    return `送信完了: ${result.notifiedCount}名に通知しました（${monthKey}）`;
+  } catch (err) {
+    handleError_(err, 'sendInitialShiftRequestNow');
+    return 'エラーが発生しました: ' + (err.message || String(err));
+  }
+}
+
+/**
+ * 【デバッグ用】通知関連のスクリプトプロパティを確認
+ */
+function checkNotificationFlags() {
+  const props = PropertiesService.getScriptProperties();
+  const allProps = props.getProperties();
+
+  console.log('=== 通知関連フラグ ===');
+  for (const key in allProps) {
+    if (key.startsWith('TEMPLATE_') || key.startsWith('ADMIN_LINE')) {
+      console.log(`${key}: ${allProps[key]}`);
+    }
+  }
+
+  return allProps;
+}
+
+/**
+ * 【デバッグ用】初回通知を送信するためのURLを生成
+ */
+function getInitialNotificationUrl() {
+  const props = PropertiesService.getScriptProperties();
+  const adminLineUserId = props.getProperty('ADMIN_LINE_USER_ID') || '';
+  const deploymentId = 'AKfycbxFVgOxQn4oL04dhx_luF040Ywwsj0UVAr9OZnt22keebq9lZECdEHUvDgLgtSx6zBC';
+  const nextMonthKey = getNextMonthKey_();
+
+  const url = `https://script.google.com/macros/s/${deploymentId}/exec?action=sendInitial&secret=${adminLineUserId}&month=${nextMonthKey}`;
+
+  console.log('初回通知送信URL:');
+  console.log(url);
+  console.log('');
+  console.log('ADMIN_LINE_USER_ID:', adminLineUserId);
+  console.log('対象月:', nextMonthKey);
+
+  return url;
 }
 
 /**

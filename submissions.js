@@ -422,7 +422,7 @@ function processInitialShiftRequest_(master, sh, values, header, nextMonthKey, i
   if (!isReminderDay_(today, monthStart, setting.daysBeforeDeadline)) return;
 
   // テンプレート確認
-  checkTemplateThreeWeeksBefore_(master, sh, values, header, nextMonthKey, idxMonthKey, adminLineUserId);
+  checkTemplateThreeWeeksBefore_(master, sh, values, header, nextMonthKey, idxMonthKey, adminLineUserId, false);
 }
 
 /**

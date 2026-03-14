@@ -627,6 +627,7 @@ function onOpen() {
  * 講師用シートの編集時に実行
  * - Input!C2がTRUEになったら提出済みにする
  * - シートをロック（編集不可にする）
+ * - 講師がC2をFALSEに変更しようとした場合は元に戻す（管理者のみ変更可能）
  */
 function onEdit(e) {
   try {
@@ -637,17 +638,73 @@ function onEdit(e) {
     if (e.range.getRow() !== SUBMIT_CONFIG.CHECK_ROW || e.range.getColumn() !== SUBMIT_CONFIG.CHECK_COL) return;
 
     const val = e.range.getValue();
-    if (val !== true) return;
+    const oldVal = e.oldValue;
 
-    // 提出済みに設定
-    sh.getRange(SUBMIT_CONFIG.STATUS_CELL_A1).setValue('提出済');
+    // チェックが入った場合：提出処理
+    if (val === true) {
+      // 提出済みに設定
+      sh.getRange(SUBMIT_CONFIG.STATUS_CELL_A1).setValue('提出済');
 
-    // シートをロック（編集不可にする）
-    lockSheetAfterSubmission_();
+      // シートをロック（編集不可にする）
+      lockSheetAfterSubmission_();
 
-    SpreadsheetApp.getActiveSpreadsheet().toast('提出済にしました。シートは編集不可になりました。', 'シフト提出', 5);
+      SpreadsheetApp.getActiveSpreadsheet().toast('提出済にしました。シートは編集不可になりました。', 'シフト提出', 5);
+      return;
+    }
+
+    // チェックが外れた場合：講師からの変更は無効化、管理者からの変更は許可
+    if (val === false && (oldVal === true || oldVal === 'TRUE')) {
+      // 現在のユーザーが管理者かどうかをチェック
+      const isAdmin = isAdminUser_();
+
+      if (!isAdmin) {
+        // 講師からのチェック外しは元に戻す
+        e.range.setValue(true);
+        SpreadsheetApp.getActiveSpreadsheet().toast(
+          'チェックを外すことはできません。変更が必要な場合は管理者に連絡してください。',
+          '操作不可',
+          5
+        );
+        return;
+      }
+
+      // 管理者からのチェック外しは許可（ポーリングでロック解除される）
+      // ここでは何もしない（マスター側のpollSubmissionsAndUpdateでロック解除される）
+      console.log('[onEdit] 管理者によるチェック解除を検知');
+    }
   } catch (err) {
     console.error('onEdit error:', err);
+  }
+}
+
+/**
+ * 現在のユーザーが管理者（ファイルオーナーまたはスクリプト実行者）かどうかを判定
+ * @returns {boolean} 管理者の場合true
+ */
+function isAdminUser_() {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const file = DriveApp.getFileById(ss.getId());
+    const currentUser = Session.getActiveUser().getEmail();
+    const owner = file.getOwner();
+    const ownerEmail = owner ? owner.getEmail() : '';
+    const scriptOwner = Session.getEffectiveUser().getEmail();
+
+    // ファイルオーナーまたはスクリプト実行者の場合は管理者
+    if (currentUser && (currentUser === ownerEmail || currentUser === scriptOwner)) {
+      return true;
+    }
+
+    // メールアドレスが取得できない場合（匿名アクセス等）は講師とみなす
+    if (!currentUser) {
+      return false;
+    }
+
+    return false;
+  } catch (e) {
+    console.error('isAdminUser_ error:', e);
+    // エラーの場合は安全のため講師とみなす（チェック外しを防ぐ）
+    return false;
   }
 }
 

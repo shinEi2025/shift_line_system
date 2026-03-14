@@ -47,15 +47,15 @@ function pollSubmissionsAndUpdate() {
     }
 
     // パフォーマンス最適化：処理対象のレコードを先にフィルタリング
-    // status='submitted' かつ ackNotifiedAt が設定済みのレコードはスキップ
+    // 1. 未提出でチェックが入った場合（提出処理）
+    // 2. 提出済みでチェックが外れた場合（ロック解除処理）
     const recordsToCheck = [];
+    const recordsToUnlock = []; // チェックが外れた提出済みレコード
+
     for (let r = 1; r < values.length; r++) {
       const status = String(values[r][idxStatus] || '').trim();
       const url = String(values[r][idxUrl] || '').trim();
       const ackAlready = values[r][idxAck];
-
-      // 既に提出済みでLINE通知も完了している場合はスキップ（最重要の最適化）
-      if (status === 'submitted' && ackAlready) continue;
 
       // URLがない場合はスキップ
       if (!url) continue;
@@ -63,6 +63,31 @@ function pollSubmissionsAndUpdate() {
       const id = extractSpreadsheetId_(url);
       if (!id) continue;
 
+      // 提出済みの場合：チェックボックスの状態を確認してロック解除判定
+      if (status === 'submitted') {
+        // LINE通知が完了していない場合は通知処理対象に追加
+        if (!ackAlready) {
+          recordsToCheck.push({
+            rowIndex: r,
+            id: id,
+            url: url,
+            status: status,
+            ackAlready: ackAlready,
+            values: values[r]
+          });
+        }
+        // ロック解除判定用に追加（チェックボックスがFALSEなら解除）
+        recordsToUnlock.push({
+          rowIndex: r,
+          id: id,
+          url: url,
+          status: status,
+          values: values[r]
+        });
+        continue;
+      }
+
+      // 未提出の場合：通常の提出処理対象に追加
       recordsToCheck.push({
         rowIndex: r,
         id: id,
@@ -74,6 +99,77 @@ function pollSubmissionsAndUpdate() {
     }
 
     console.log(`[pollSubmissionsAndUpdate] 処理対象レコード数: ${recordsToCheck.length}/${values.length - 1}`);
+    console.log(`[pollSubmissionsAndUpdate] ロック解除チェック対象: ${recordsToUnlock.length}件`);
+
+    // ロック解除処理（チェックボックスがFALSEになった提出済みレコード）
+    for (const record of recordsToUnlock) {
+      try {
+        const checkboxValue = readTeacherSubmittedFlag_(record.id);
+
+        // チェックボックスがFALSE（チェックが外れた）場合、ロックを解除
+        if (checkboxValue === false) {
+          const r = record.rowIndex;
+          const teacherId = idxTeacherId >= 0 ? String(record.values[idxTeacherId] || '').trim() : '';
+          const teacherName = idxName >= 0 ? String(record.values[idxName] || '').trim() : '';
+          const monthKey = formatMonthKey_(record.values[idxMonthKey]);
+
+          console.log(`[pollSubmissionsAndUpdate] チェック解除検知: ${teacherName} (${monthKey})`);
+
+          // 講師情報を取得
+          const teacher = getTeacherInfo_(master, teacherId, teacherName);
+          const teacherEmail = teacher ? teacher.email || '' : '';
+          const lineUserId = teacher ? teacher.lineUserId || '' : '';
+
+          // メールアドレスがない場合は警告ログのみ
+          if (!teacherEmail) {
+            console.error(`[pollSubmissionsAndUpdate] ロック解除スキップ: ${teacherName}のメールアドレスが未登録`);
+            continue;
+          }
+
+          // ロック解除
+          const unlockResult = unlockTeacherSheet_(record.id, teacherEmail);
+          if (!unlockResult.success) {
+            console.error(`[pollSubmissionsAndUpdate] ロック解除失敗: ${teacherName}`, unlockResult.errorMessage);
+            continue;
+          }
+
+          // Submissionsの状態をリセット（再提出可能にする）
+          sh.getRange(r + 1, idxStatus + 1).setValue('created');
+          if (idxSubmittedAt >= 0) {
+            sh.getRange(r + 1, idxSubmittedAt + 1).setValue('');
+          }
+          if (idxLockedAt >= 0) {
+            sh.getRange(r + 1, idxLockedAt + 1).setValue('');
+          }
+          if (idxAck >= 0) {
+            sh.getRange(r + 1, idxAck + 1).setValue('');
+          }
+
+          // 講師シートのステータス（B2）を「未提出」に戻す
+          try {
+            const teacherSs = SpreadsheetApp.openById(record.id);
+            const inputSheet = teacherSs.getSheetByName('Input');
+            if (inputSheet) {
+              inputSheet.getRange('B2').setValue('未提出');
+            }
+          } catch (e) {
+            console.error('Failed to reset B2 status:', e);
+          }
+
+          // 講師にLINE通知
+          if (lineUserId) {
+            const lastName = extractLastName_(teacherName);
+            pushLine_(lineUserId,
+              `【シフト変更依頼】\n${lastName}先生（${monthKey}）のシフトを変更していただくようお願いします。\nシートの編集が可能になりました。\n\n※編集するには登録したGmailでGoogleにログインしてください。\n変更後、☑（提出）を入れてください。\n${record.url}`
+            );
+          }
+
+          console.log(`[pollSubmissionsAndUpdate] ロック解除完了: ${teacherName} (${monthKey})`);
+        }
+      } catch (e) {
+        console.error(`[pollSubmissionsAndUpdate] ロック解除チェック中にエラー: ${e.message}`);
+      }
+    }
 
     // 処理対象がない場合は早期リターン
     if (recordsToCheck.length === 0) return;

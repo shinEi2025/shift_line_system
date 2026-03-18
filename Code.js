@@ -131,6 +131,17 @@ function doPost(e) {
           } else {
             const confirmation = parseConfirmationResponse_(textRaw);
             if (confirmation === 'yes') {
+              // Gmailアドレスかどうかをチェック
+              if (!isGmailAddress_(updateInfo.newEmail)) {
+                replyLine_(replyToken, `※${updateInfo.newEmail}はGmailではないため登録できません。\nGoogleスプレッドシートの編集にはGmailアドレスが必要です。\nGmailアドレスを送信してください。`);
+                props.deleteProperty(emailUpdateKey);
+                // EMAIL_REQUEST状態をセット
+                props.setProperty(`EMAIL_REQUEST_${userId}`, JSON.stringify({
+                  name: updateInfo.name,
+                  timestamp: new Date().getTime()
+                }));
+                continue;
+              }
               // メールアドレスを更新
               const teacher = findTeacherByName_(master, updateInfo.name);
               if (teacher) {
@@ -354,7 +365,9 @@ function doPost(e) {
 
           // 名前が抽出できた場合は自動登録
           if (teacherName && teacherName.length >= 2) {
-            const newTeacher = addNewTeacher_(master, teacherName, userId, extractedEmail || '');
+            // Gmail以外のアドレスは登録しない
+            const emailToRegister = (extractedEmail && isGmailAddress_(extractedEmail)) ? extractedEmail : '';
+            const newTeacher = addNewTeacher_(master, teacherName, userId, emailToRegister);
             const lastName = extractLastName_(newTeacher.name);
 
             let message = `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}`;
@@ -370,7 +383,7 @@ function doPost(e) {
                   name: newTeacher.name,
                   timestamp: new Date().getTime()
                 }));
-                message += `\n\nGmailアドレスを登録してください。\nGmailアドレスを送信してください。\n例：example@gmail.com`;
+                message += `\n\n※送信いただいたメールアドレス（${extractedEmail}）はGmailではないため登録できません。\nGoogleスプレッドシートの編集にはGmailアドレスが必要です。\nGmailアドレスを送信してください。\n例：example@gmail.com`;
               }
             } else {
               // メールアドレスが登録されていない場合、自動で要求
@@ -522,20 +535,29 @@ function doPost(e) {
             );
             continue;
           } else if (!currentEmail) {
-            // メールアドレスが登録されていない場合、登録
+            // メールアドレスが登録されていない場合
             const lastName = extractLastName_(result.name);
-            if (result.row) {
-              updateTeacherEmail_(master, result.row, extractedEmail);
-              replyLine_(replyToken, `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}\n\nメールアドレスを登録しました：${extractedEmail}`);
+            if (isGmailAddress_(extractedEmail)) {
+              // Gmailアドレスの場合のみ登録
+              if (result.row) {
+                updateTeacherEmail_(master, result.row, extractedEmail);
+                replyLine_(replyToken, `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}\n\nメールアドレスを登録しました：${extractedEmail}`);
+              } else {
+                replyLine_(replyToken, `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}`);
+              }
             } else {
-              // result.rowがない場合でも返信を送信
-              replyLine_(replyToken, `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}`);
+              // Gmailアドレスでない場合、Gmailアドレスを要求
+              props.setProperty(`EMAIL_REQUEST_${userId}`, JSON.stringify({
+                name: result.name,
+                timestamp: new Date().getTime()
+              }));
+              replyLine_(replyToken, `${lastName}先生、登録済みですがGmailアドレスがまだ登録されていません。\n\n※送信いただいたメールアドレス（${extractedEmail}）はGmailではないため登録できません。\nGoogleスプレッドシートの編集にはGmailアドレスが必要です。\nGmailアドレスを送信してください。\n例：example@gmail.com`);
             }
             continue;
           }
           // フォールバック：条件に一致しない場合（通常は到達しない）
-          const lastName = extractLastName_(result.name);
-          replyLine_(replyToken, `既に登録済みです：${lastName}先生`);
+          const lastName2 = extractLastName_(result.name);
+          replyLine_(replyToken, `既に登録済みです：${lastName2}先生`);
           continue;
         } else {
           // メールアドレスが含まれていない場合
@@ -600,12 +622,12 @@ function doPost(e) {
                 name: result.name,
                 timestamp: new Date().getTime()
               }));
-              replyLine_(replyToken, `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}\n\nGmailアドレスを登録してください。\nGmailアドレスを送信してください。\n例：example@gmail.com`);
+              replyLine_(replyToken, `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}\n\n※送信いただいたメールアドレス（${extractedEmail}）はGmailではないため登録できません。\nGoogleスプレッドシートの編集にはGmailアドレスが必要です。\nGmailアドレスを送信してください。\n例：example@gmail.com`);
             }
             continue;
           }
         }
-        
+
         // メールアドレスが含まれていない場合
         let message = `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}`;
         if (!currentEmail) {

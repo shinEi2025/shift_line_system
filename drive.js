@@ -93,15 +93,17 @@ function ensureViewer_(file, email) {
  */
 function setAnyoneWithLinkCanEdit_(fileId) {
   try {
-    Drive.Permissions.create(
-      {
-        type: 'anyone',
-        role: 'writer'
-      },
-      fileId
-    );
-    console.log(`setAnyoneWithLinkCanEdit_: Successfully set anyone with link as editor for file: ${fileId}`);
-    return true;
+    return withRetry_(() => {
+      Drive.Permissions.create(
+        {
+          type: 'anyone',
+          role: 'writer'
+        },
+        fileId
+      );
+      console.log(`setAnyoneWithLinkCanEdit_: Successfully set anyone with link as editor for file: ${fileId}`);
+      return true;
+    }, { label: 'setAnyoneWithLinkCanEdit_' });
   } catch (err) {
     console.error(`setAnyoneWithLinkCanEdit_ error: ${err.message || err}`);
     return false;
@@ -196,10 +198,12 @@ function getEffectiveUserEmail_(spreadsheetId) {
 
 /** 月フォルダ（例：2026-01）を親フォルダ内に作成・取得 */
 function ensureMonthFolder_(monthKey, parentFolderId) {
-  const parent = DriveApp.getFolderById(parentFolderId);
-  const it = parent.getFoldersByName(monthKey);
-  if (it.hasNext()) return it.next().getId();
-  return parent.createFolder(monthKey).getId();
+  return withRetry_(() => {
+    const parent = DriveApp.getFolderById(parentFolderId);
+    const it = parent.getFoldersByName(monthKey);
+    if (it.hasNext()) return it.next().getId();
+    return parent.createFolder(monthKey).getId();
+  }, { label: 'ensureMonthFolder_' });
 }
 
 /**
@@ -210,27 +214,23 @@ function ensureMonthFolder_(monthKey, parentFolderId) {
  */
 function findTemplateByMonth_(monthKey, templateFolderId) {
   try {
-    const templateFolder = DriveApp.getFolderById(templateFolderId);
-    const files = templateFolder.getFiles();
-    
-    // 月キーに基づいてテンプレートファイル名を検索
-    // 例：2026-01 → "2026-01_シフト提出テンプレ"
-    const templateNamePattern = `${monthKey}_シフト提出テンプレ`;
-    
-    while (files.hasNext()) {
-      const file = files.next();
-      const fileName = file.getName();
-      
-      // ファイル名が月キーで始まり、テンプレート名を含むかチェック
-      if (fileName.startsWith(monthKey) && fileName.includes('シフト提出テンプレ')) {
-        // スプレッドシートかどうかを確認
-        if (file.getMimeType() === MimeType.GOOGLE_SHEETS) {
-          return file.getId();
+    return withRetry_(() => {
+      const templateFolder = DriveApp.getFolderById(templateFolderId);
+      const files = templateFolder.getFiles();
+
+      while (files.hasNext()) {
+        const file = files.next();
+        const fileName = file.getName();
+
+        if (fileName.startsWith(monthKey) && fileName.includes('シフト提出テンプレ')) {
+          if (file.getMimeType() === MimeType.GOOGLE_SHEETS) {
+            return file.getId();
+          }
         }
       }
-    }
-    
-    return null;
+
+      return null;
+    }, { label: 'findTemplateByMonth_' });
   } catch (err) {
     logError_(err, 'findTemplateByMonth_', { monthKey, templateFolderId });
     return null;
@@ -239,10 +239,12 @@ function findTemplateByMonth_(monthKey, templateFolderId) {
 
 /** テンプレのスプレッドシートをフォルダにコピーして、新しいSpreadsheetIdを返す */
 function copyTemplateSpreadsheet_(folderId, templateSpreadsheetId, fileName) {
-  const folder = DriveApp.getFolderById(folderId);
-  const templateFile = DriveApp.getFileById(templateSpreadsheetId);
-  const copied = templateFile.makeCopy(fileName, folder);
-  const newSpreadsheetId = copied.getId();
+  const newSpreadsheetId = withRetry_(() => {
+    const folder = DriveApp.getFolderById(folderId);
+    const templateFile = DriveApp.getFileById(templateSpreadsheetId);
+    const copied = templateFile.makeCopy(fileName, folder);
+    return copied.getId();
+  }, { label: 'copyTemplateSpreadsheet_' });
   
   // コピー後にマスター側のコードを展開（Apps Script APIを使用）
   // 注意: この機能を使用するには、以下の前提条件が必要です：

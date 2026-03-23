@@ -668,7 +668,10 @@ function onFormSubmit(e) {
   try {
     const nv = extractNamedValues_(e);
 
-    const master = SpreadsheetApp.openById(CONFIG.MASTER_SPREADSHEET_ID);
+    const master = withRetry_(
+      () => SpreadsheetApp.openById(CONFIG.MASTER_SPREADSHEET_ID),
+      { label: 'onFormSubmit.openMaster' }
+    );
 
     teacherNameRaw = (nv[CONFIG_FORM.QUESTION_TEACHER_NAME] || '').trim();
     if (!teacherNameRaw) throw new Error(`フォームに「${CONFIG_FORM.QUESTION_TEACHER_NAME}」がありません（または空です）`);

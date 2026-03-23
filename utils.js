@@ -68,6 +68,43 @@ https://apps.apple.com/jp/app/google-%E3%82%B9%E3%83%97%E3%83%AC%E3%83%83%E3%83%
 // ユーティリティ関数
 // =============================================================================
 
+/**
+ * 一時的なサービスエラーに対してリトライを行うラッパー
+ * Google Drive / Sheets API の "Service error" 等に対応
+ * @param {Function} fn - 実行する関数
+ * @param {Object} options - オプション
+ * @param {number} options.maxRetries - 最大リトライ回数（デフォルト3）
+ * @param {number} options.baseDelayMs - 初回待機ミリ秒（デフォルト1000）
+ * @param {string} options.label - ログ用ラベル
+ * @returns {*} fn の戻り値
+ */
+function withRetry_(fn, options = {}) {
+  const maxRetries = options.maxRetries || 3;
+  const baseDelayMs = options.baseDelayMs || 1000;
+  const label = options.label || 'withRetry_';
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return fn();
+    } catch (err) {
+      const msg = String(err.message || err);
+      const isTransient = /Service (error|invocation|unavailable)/i.test(msg)
+        || /internal error/i.test(msg)
+        || /server error/i.test(msg)
+        || /try again later/i.test(msg)
+        || /Timeout/i.test(msg);
+
+      if (!isTransient || attempt >= maxRetries) {
+        throw err;
+      }
+
+      const delay = baseDelayMs * Math.pow(2, attempt);
+      console.warn(`[${label}] attempt ${attempt + 1}/${maxRetries} failed: ${msg} — retrying in ${delay}ms`);
+      Utilities.sleep(delay);
+    }
+  }
+}
+
 function normalizeNameKey_(s) {
   // 全角/半角の統一と空白除去
   let normalized = String(s || '').trim();
@@ -905,15 +942,17 @@ function appendSubmission_(masterSs, obj) {
 
 /** 講師シートに _META を書き込む */
 function writeMetaToTeacherSheet_(teacherSpreadsheetId, metaSheetName, meta) {
-  const ss = SpreadsheetApp.openById(teacherSpreadsheetId);
-  let sh = ss.getSheetByName(metaSheetName);
-  if (!sh) sh = ss.insertSheet(metaSheetName);
+  withRetry_(() => {
+    const ss = SpreadsheetApp.openById(teacherSpreadsheetId);
+    let sh = ss.getSheetByName(metaSheetName);
+    if (!sh) sh = ss.insertSheet(metaSheetName);
 
-  const rows = Object.entries(meta).map(([k, v]) => [k, v]);
-  sh.clearContents();
-  if (rows.length) sh.getRange(1, 1, rows.length, 2).setValues(rows);
+    const rows = Object.entries(meta).map(([k, v]) => [k, v]);
+    sh.clearContents();
+    if (rows.length) sh.getRange(1, 1, rows.length, 2).setValues(rows);
 
-  sh.hideSheet();
+    sh.hideSheet();
+  }, { label: 'writeMetaToTeacherSheet_' });
 }
 
 

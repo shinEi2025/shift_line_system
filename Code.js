@@ -196,7 +196,7 @@ function doPost(e) {
             } else {
               // Gmailアドレスでない場合、再度促す
               const lastName = extractLastName_(requestInfo.name);
-              replyLine_(replyToken, `${lastName}先生、Gmailアドレスを登録してください。\nGmailアドレスを送信してください。\n例：example@gmail.com`);
+              replyLine_(replyToken, `${lastName}先生、※送信いただいたメールアドレス（${extractedEmail}）はGmailではないため登録できません。\nGoogleスプレッドシートの編集にはGmailアドレスが必要です。\nGmailアドレスを送信してください。\n例：example@gmail.com`);
             }
             continue;
           } else {

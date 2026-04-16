@@ -369,7 +369,7 @@ function doPost(e) {
 
           // 名前が抽出できた場合は自動登録
           if (teacherName && teacherName.length >= 2) {
-            // Gmail以外のアドレスは登録しない
+            // GmailアドレスのみTeachersに登録する（非Gmailは後でGmailを要求するため登録しない）
             const emailToRegister = (extractedEmail && isGmailAddress_(extractedEmail)) ? extractedEmail : '';
             const newTeacher = addNewTeacher_(master, teacherName, userId, emailToRegister);
             const lastName = extractLastName_(newTeacher.name);

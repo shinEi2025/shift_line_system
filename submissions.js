@@ -418,7 +418,7 @@ function remindUnappliedToManager() {
 
         // 講師に通知（teacher の場合）
         if (matchedReminder.targetAudience === 'teacher' && unappliedList.length > 0) {
-          sendUnappliedReminderToTeachers_(master, unappliedList, targetMonth);
+          sendUnappliedReminderToTeachers_(master, unappliedList, targetMonth, matchedReminder.messageTemplate);
           notificationSent = true;
         }
 
@@ -444,7 +444,7 @@ function processInitialShiftRequest_(master, sh, values, header, nextMonthKey, i
   if (!isReminderDay_(today, monthStart, setting.daysBeforeDeadline)) return;
 
   // テンプレート確認
-  checkTemplateThreeWeeksBefore_(master, sh, values, header, nextMonthKey, idxMonthKey, adminLineUserId, false);
+  checkTemplateThreeWeeksBefore_(master, sh, values, header, nextMonthKey, idxMonthKey, adminLineUserId);
 }
 
 /**
@@ -679,18 +679,35 @@ function handlePreviousMonthUnapplied_(master, sh, values, header, prevMonthKey,
 
 /**
  * 未提出者にLINEリマインド通知を送信
+ * 送信後に reminderNotifiedAt を更新するため、remindUnsubmitted() との重複通知を自動防止できる
  * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} master - マスタースプレッドシート
  * @param {Array} unappliedList - 未提出者リスト
  * @param {string} monthKey - 月キー
+ * @param {string|null} messageTemplate - ReminderSettingsのメッセージテンプレート（nullの場合はデフォルトメッセージ）
  */
-function sendUnappliedReminderToTeachers_(master, unappliedList, monthKey) {
+function sendUnappliedReminderToTeachers_(master, unappliedList, monthKey, messageTemplate = null) {
   try {
+    const sh = master.getSheetByName(CONFIG.SHEET_SUBMISSIONS);
+    const subHeader = sh ? sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0] : [];
+    const idxReminder = subHeader.indexOf('reminderNotifiedAt');
+
     for (const item of unappliedList) {
       const lineUserId = getTeacherLineUserId_(master, item.teacherId, item.name);
       if (lineUserId) {
         const lastName = extractLastName_(item.name);
-        let message = `【シフト未提出リマインド】\n${lastName}先生（${monthKey}）の提出がまだのようです。`;
-        
+        let message;
+
+        if (messageTemplate) {
+          // ReminderSettingsのテンプレートを使用（{name}・{monthKey} を置換）
+          message = replaceMessageVariables_(messageTemplate, {
+            name: lastName,
+            monthKey: monthKey
+          });
+        } else {
+          // デフォルトメッセージ（handlePreviousMonthUnapplied_ などテンプレートなしの呼び出し用）
+          message = `【シフト未提出リマインド】\n${lastName}先生（${monthKey}）の提出がまだのようです。`;
+        }
+
         if (item.sheetUrl && item.sheetUrl.trim()) {
           // sheetUrlがある場合：シートが作成済みなので、URLを送信
           message += `\nこちらから入力・提出（☑）をお願いします。\n${item.sheetUrl}`;
@@ -698,8 +715,13 @@ function sendUnappliedReminderToTeachers_(master, unappliedList, monthKey) {
           // sheetUrlがない場合：シートがまだ作成されていない
           message += `\nシフト申請用紙の準備がまだのようです。管理者に連絡するか、フォーム送信をお待ちください。`;
         }
-        
+
         pushLine_(lineUserId, message);
+
+        // reminderNotifiedAt を更新（remindUnsubmitted() との重複通知を防ぐ）
+        if (sh && idxReminder >= 0 && item.row) {
+          sh.getRange(item.row, idxReminder + 1).setValue(new Date());
+        }
       }
     }
   } catch (err) {
@@ -863,19 +885,10 @@ function createSubmissionsForAllTeachers_(master, monthKey) {
  * @param {string} nextMonthKey - 来月の月キー
  * @param {number} idxMonthKey - monthKey列のインデックス
  * @param {string} adminLineUserId - 管理者のLINE User ID
- * @param {boolean} skipTimeCheck - trueの場合は15時チェックをスキップ（手動実行用）
  */
-function checkTemplateThreeWeeksBefore_(master, sh, values, header, nextMonthKey, idxMonthKey, adminLineUserId, skipTimeCheck) {
+function checkTemplateThreeWeeksBefore_(master, sh, values, header, nextMonthKey, idxMonthKey, adminLineUserId) {
   try {
     const today = new Date();
-    const currentHour = today.getHours();
-
-    // 午後3時（15時）でない場合はスキップ（skipTimeCheckがtrueの場合は無視）
-    if (!skipTimeCheck && currentHour !== 15) {
-      console.log(`15時チェック: 現在${currentHour}時のためスキップ`);
-      return;
-    }
-    
     const props = PropertiesService.getScriptProperties();
 
     const monthStart = getMonthStartDate_(nextMonthKey);

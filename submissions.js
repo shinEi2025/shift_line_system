@@ -382,7 +382,20 @@ function remindUnappliedToManager() {
       // 対象月の未提出者と提出済み者を取得（ループ外で1回だけ取得）
       const { unappliedList, appliedList } = getSubmissionLists_(values, idxMonthKey, idxStatus, idxName, idxTeacherId, idxUrl, targetMonth, onLeaveTeachers);
 
+      const props = PropertiesService.getScriptProperties();
+
       for (const matchedReminder of matchedReminders) {
+        // 重複実行防止：今日既にこのリマインダーを送信済みかチェック
+        const reminderSentKey = `REMINDER_SENT_${matchedReminder.id}_${targetMonth}`;
+        const lastSentDateStr = props.getProperty(reminderSentKey);
+        if (lastSentDateStr) {
+          const lastSentDate = new Date(lastSentDateStr);
+          if (isSameJstDate_(lastSentDate, today)) {
+            console.log(`リマインダースキップ（本日送信済み）: ${matchedReminder.id} (${targetMonth})`);
+            continue;
+          }
+        }
+
         console.log(`リマインダー該当: ${matchedReminder.id} (${targetMonth})`);
 
         // 未提出者リストのテキストを生成
@@ -394,15 +407,24 @@ function remindUnappliedToManager() {
           submissionList: submissionListText
         });
 
+        let notificationSent = false;
+
         // 管理者に通知（manager の場合）
         if (matchedReminder.targetAudience === 'manager' &&
             (unappliedList.length > 0 || (matchedReminder.daysBeforeDeadline === 0 && appliedList.length > 0))) {
           pushLine_(adminLineUserId, message.trim());
+          notificationSent = true;
         }
 
         // 講師に通知（teacher の場合）
         if (matchedReminder.targetAudience === 'teacher' && unappliedList.length > 0) {
           sendUnappliedReminderToTeachers_(master, unappliedList, targetMonth);
+          notificationSent = true;
+        }
+
+        // 送信済みフラグを設定（通知を送った場合のみ）
+        if (notificationSent) {
+          props.setProperty(reminderSentKey, today.toISOString());
         }
       }
     }
@@ -429,8 +451,8 @@ function processInitialShiftRequest_(master, sh, values, header, nextMonthKey, i
  * 提出状況リストを取得
  */
 function getSubmissionLists_(values, idxMonthKey, idxStatus, idxName, idxTeacherId, idxUrl, targetMonth, onLeaveTeachers) {
-  const unappliedList = [];
-  const appliedList = [];
+  const unappliedMap = new Map(); // 重複排除用（氏名をキーに）
+  const appliedSet = new Set(); // 重複排除用
 
   for (let r = 1; r < values.length; r++) {
     const mk = normalizeMonthKey_(values[r][idxMonthKey]);
@@ -445,19 +467,27 @@ function getSubmissionLists_(values, idxMonthKey, idxStatus, idxName, idxTeacher
     if (onLeaveTeachers.has(teacherName)) continue;
 
     if (status === 'submitted') {
-      appliedList.push(teacherName);
+      appliedSet.add(teacherName);
     } else if (status === 'created' || status === '' || status === 'teacher_not_found' || status === 'template_not_found') {
+      // 重複がある場合は後の行を優先（sheetUrlがある方を優先）
+      const existingEntry = unappliedMap.get(teacherName);
       const sheetUrl = idxUrl >= 0 ? String(values[r][idxUrl] || '').trim() : '';
-      unappliedList.push({
-        row: r + 1,
-        name: teacherName,
-        teacherId: idxTeacherId >= 0 ? String(values[r][idxTeacherId] || '').trim() : '',
-        sheetUrl: sheetUrl
-      });
+
+      if (!existingEntry || (sheetUrl && !existingEntry.sheetUrl)) {
+        unappliedMap.set(teacherName, {
+          row: r + 1,
+          name: teacherName,
+          teacherId: idxTeacherId >= 0 ? String(values[r][idxTeacherId] || '').trim() : '',
+          sheetUrl: sheetUrl
+        });
+      }
     }
   }
 
-  return { unappliedList, appliedList };
+  return {
+    unappliedList: Array.from(unappliedMap.values()),
+    appliedList: Array.from(appliedSet)
+  };
 }
 
 /**
@@ -1149,6 +1179,14 @@ function sendInitialShiftRequestNow(targetMonthKey) {
 }
 
 /**
+ * 【手動実行用】2026年5月分のシフト申請依頼を即時送信
+ * GASエディタから直接実行可能（パラメータ不要）
+ */
+function sendMay2026ShiftRequest() {
+  return sendInitialShiftRequestNow('2026-05');
+}
+
+/**
  * 【デバッグ用】通知関連のスクリプトプロパティを確認
  */
 function checkNotificationFlags() {
@@ -1157,12 +1195,43 @@ function checkNotificationFlags() {
 
   console.log('=== 通知関連フラグ ===');
   for (const key in allProps) {
-    if (key.startsWith('TEMPLATE_') || key.startsWith('ADMIN_LINE')) {
+    if (key.startsWith('TEMPLATE_') || key.startsWith('ADMIN_LINE') || key.startsWith('REMINDER_SENT_')) {
       console.log(`${key}: ${allProps[key]}`);
     }
   }
 
   return allProps;
+}
+
+/**
+ * 【メンテナンス用】古いリマインダーフラグをクリーンアップ
+ * 3ヶ月以上前のフラグを削除
+ */
+function cleanupOldReminderFlags() {
+  const props = PropertiesService.getScriptProperties();
+  const allProps = props.getProperties();
+  const today = new Date();
+  const threeMonthsAgo = new Date(today.getFullYear(), today.getMonth() - 3, 1);
+  let deletedCount = 0;
+
+  console.log('=== 古いリマインダーフラグのクリーンアップ ===');
+
+  for (const key in allProps) {
+    // REMINDER_SENT_*, TEMPLATE_CHECK_*, TEMPLATE_READY_* をチェック
+    const monthMatch = key.match(/(\d{4}-\d{2})$/);
+    if (monthMatch) {
+      const monthKey = monthMatch[1];
+      const monthDate = getMonthStartDate_(monthKey);
+      if (monthDate && monthDate < threeMonthsAgo) {
+        console.log(`削除: ${key}`);
+        props.deleteProperty(key);
+        deletedCount++;
+      }
+    }
+  }
+
+  console.log(`クリーンアップ完了: ${deletedCount}件のフラグを削除しました`);
+  return `${deletedCount}件のフラグを削除しました`;
 }
 
 /**

@@ -189,6 +189,10 @@ function doPost(e) {
                 updateTeacherEmail_(master, teacher.row, extractedEmail);
                 const lastName = extractLastName_(requestInfo.name);
                 replyLine_(replyToken, `メールアドレスを登録しました：${extractedEmail}\n\n${lastName}先生、登録が完了しました。`);
+                // 管理者に通知（メール登録完了）
+                if (adminLineUserId) {
+                  pushLine_(adminLineUserId, `【メール登録完了】${requestInfo.name}さんがGmailアドレスを登録しました\nメール: ${extractedEmail}`);
+                }
               } else {
                 replyLine_(replyToken, `エラー：講師情報が見つかりませんでした。`);
               }
@@ -376,6 +380,10 @@ function doPost(e) {
               // Gmailアドレスかどうかをチェック
               if (isGmailAddress_(extractedEmail)) {
                 message += `\n\nメールアドレスを登録しました：${extractedEmail}`;
+                // 管理者に通知（Gmail登録完了）
+                if (adminLineUserId) {
+                  pushLine_(adminLineUserId, `【新規LINE登録】${newTeacher.name}さんが新規登録しました\nメール: ${extractedEmail}`);
+                }
               } else {
                 // Gmailアドレスでない場合、Gmailアドレスを要求
                 const props = PropertiesService.getScriptProperties();
@@ -384,6 +392,10 @@ function doPost(e) {
                   timestamp: new Date().getTime()
                 }));
                 message += `\n\n※送信いただいたメールアドレス（${extractedEmail}）はGmailではないため登録できません。\nGoogleスプレッドシートの編集にはGmailアドレスが必要です。\nGmailアドレスを送信してください。\n例：example@gmail.com`;
+                // 管理者に通知（Gmail以外のため未登録）
+                if (adminLineUserId) {
+                  pushLine_(adminLineUserId, `【新規LINE登録】${newTeacher.name}さんが新規登録しました（メール未登録：${extractedEmail}はGmail以外）`);
+                }
               }
             } else {
               // メールアドレスが登録されていない場合、自動で要求
@@ -393,6 +405,10 @@ function doPost(e) {
                 timestamp: new Date().getTime()
               }));
               message += `\n\nGmailアドレスを登録してください。\nGmailアドレスを送信してください。\n例：example@gmail.com`;
+              // 管理者に通知（メール未登録）
+              if (adminLineUserId) {
+                pushLine_(adminLineUserId, `【新規LINE登録】${newTeacher.name}さんが新規登録しました（メール未登録）`);
+              }
             }
 
             replyLine_(replyToken, message);
@@ -580,7 +596,7 @@ function doPost(e) {
       }
 
       if (result.status === 'linked') {
-        // 新規登録の場合
+        // 既存講師のLINE登録の場合
         const lastName = extractLastName_(result.name);
         const currentEmail = result.email || '';
 
@@ -589,6 +605,10 @@ function doPost(e) {
           if (currentEmail && currentEmail === extractedEmail) {
             // 初回LINE登録完了（メールアドレスは既に登録済み）
             replyLine_(replyToken, `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}`);
+            // 管理者に通知
+            if (adminLineUserId) {
+              pushLine_(adminLineUserId, `【LINE登録完了】${result.name}さんがLINE連携しました\nメール: ${currentEmail}`);
+            }
             continue;
           } else if (currentEmail && currentEmail !== extractedEmail) {
             // メールアドレスが違う場合、確認を求める
@@ -603,6 +623,10 @@ function doPost(e) {
               replyToken,
               `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}\n\n登録されているメールアドレスと違います。\n現在: ${currentEmail}\n送信: ${extractedEmail}\n\n変更しますか？「はい」または「いいえ」と送信してください。`
             );
+            // 管理者に通知
+            if (adminLineUserId) {
+              pushLine_(adminLineUserId, `【LINE登録完了】${result.name}さんがLINE連携しました（メール変更確認中）\n現在: ${currentEmail}\n送信: ${extractedEmail}`);
+            }
             continue;
           } else if (!currentEmail) {
             // メールアドレスが登録されていない場合
@@ -612,8 +636,16 @@ function doPost(e) {
               if (result.row) {
                 updateTeacherEmail_(master, result.row, extractedEmail);
                 replyLine_(replyToken, `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}\n\nメールアドレスを登録しました：${extractedEmail}`);
+                // 管理者に通知
+                if (adminLineUserId) {
+                  pushLine_(adminLineUserId, `【LINE登録完了】${result.name}さんがLINE連携しました\nメール: ${extractedEmail}`);
+                }
               } else {
                 replyLine_(replyToken, `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}`);
+                // 管理者に通知
+                if (adminLineUserId) {
+                  pushLine_(adminLineUserId, `【LINE登録完了】${result.name}さんがLINE連携しました（メール未登録）`);
+                }
               }
             } else {
               // Gmailアドレスでない場合、Gmailアドレスを要求
@@ -623,6 +655,10 @@ function doPost(e) {
                 timestamp: new Date().getTime()
               }));
               replyLine_(replyToken, `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}\n\n※送信いただいたメールアドレス（${extractedEmail}）はGmailではないため登録できません。\nGoogleスプレッドシートの編集にはGmailアドレスが必要です。\nGmailアドレスを送信してください。\n例：example@gmail.com`);
+              // 管理者に通知
+              if (adminLineUserId) {
+                pushLine_(adminLineUserId, `【LINE登録完了】${result.name}さんがLINE連携しました（メール未登録：${extractedEmail}はGmail以外）`);
+              }
             }
             continue;
           }
@@ -638,6 +674,15 @@ function doPost(e) {
             timestamp: new Date().getTime()
           }));
           message += `\n\n${lastName}先生、Gmailアドレスを登録してください。\nGmailアドレスを送信してください。\n例：example@gmail.com`;
+          // 管理者に通知
+          if (adminLineUserId) {
+            pushLine_(adminLineUserId, `【LINE登録完了】${result.name}さんがLINE連携しました（メール未登録）`);
+          }
+        } else {
+          // 管理者に通知（メール登録済み）
+          if (adminLineUserId) {
+            pushLine_(adminLineUserId, `【LINE登録完了】${result.name}さんがLINE連携しました\nメール: ${currentEmail}`);
+          }
         }
         replyLine_(replyToken, message);
         continue;

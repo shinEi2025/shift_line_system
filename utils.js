@@ -72,10 +72,10 @@ https://apps.apple.com/jp/app/google-%E3%82%B9%E3%83%97%E3%83%AC%E3%83%83%E3%83%
  * 一時的なサービスエラーに対してリトライを行うラッパー
  * Google Drive / Sheets API の "Service error" 等に対応
  * @param {Function} fn - 実行する関数
- * @param {Object} options - オプション
- * @param {number} options.maxRetries - 最大リトライ回数（デフォルト3）
- * @param {number} options.baseDelayMs - 初回待機ミリ秒（デフォルト1000）
- * @param {string} options.label - ログ用ラベル
+ * @param {Object} [options] - オプション
+ * @param {number} [options.maxRetries] - 最大リトライ回数（デフォルト3）
+ * @param {number} [options.baseDelayMs] - 初回待機ミリ秒（デフォルト1000）
+ * @param {string} [options.label] - ログ用ラベル
  * @returns {*} fn の戻り値
  */
 function withRetry_(fn, options = {}) {

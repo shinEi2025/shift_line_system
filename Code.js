@@ -287,7 +287,10 @@ function doPost(e) {
                 sh.getRange(matched.row, idxLine + 1).setValue(userId);
                 if (idxLinkedAt >= 0) sh.getRange(matched.row, idxLinkedAt + 1).setValue(new Date());
                 const lastName = extractLastName_(matched.name);
-                replyLine_(replyToken, `${lastName}先生、登録が完了しました。`);
+                replyLine_(replyToken, `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}`);
+                if (adminLineUserId) {
+                  pushLine_(adminLineUserId, `【LINE登録完了】${matched.name}さんがLINE連携しました\nメール: ${matched.email}`);
+                }
               } else {
                 replyLine_(replyToken, `エラーが発生しました。管理者に連絡してください。`);
               }
@@ -433,7 +436,9 @@ function doPost(e) {
             if (adminLineUserId) {
               pushLine_(adminLineUserId, `【新規LINE登録】${newTeacher.name}さんが新規登録しました（メール未登録）`);
             }
-            replyLine_(replyToken, `${lastName}先生、Gmailアドレスを登録してください。\nGmailアドレスを送信してください。\n例：example@gmail.com`);
+            let nameOnlyMsg = `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}`;
+            nameOnlyMsg += `\n\nGmailアドレスを登録してください。\nGmailアドレスを送信してください。\n例：example@gmail.com`;
+            replyLine_(replyToken, nameOnlyMsg);
             continue;
           }
           // 名前として認識できない場合は無視
@@ -442,6 +447,31 @@ function doPost(e) {
       }
 
       if (result.status === 'multiple') {
+        // 同じメッセージ内にメールアドレスが含まれていれば、候補と照合して即時解決を試みる
+        if (extractedEmail && isValidEmail_(extractedEmail)) {
+          const matched = (result.candidatesWithInfo || []).find(
+            c => c.email && c.email.toLowerCase() === extractedEmail.toLowerCase()
+          );
+          if (matched) {
+            const sh = master.getSheetByName(CONFIG.SHEET_TEACHERS);
+            const header = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+            const idxLine = header.indexOf('lineUserId');
+            const idxLinkedAt = header.indexOf('lineLinkedAt');
+            if (idxLine >= 0 && matched.row) {
+              sh.getRange(matched.row, idxLine + 1).setValue(userId);
+              if (idxLinkedAt >= 0) sh.getRange(matched.row, idxLinkedAt + 1).setValue(new Date());
+              const lastName = extractLastName_(matched.name);
+              replyLine_(replyToken, `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}`);
+              if (adminLineUserId) {
+                pushLine_(adminLineUserId, `【LINE登録完了】${matched.name}さんがLINE連携しました\nメール: ${matched.email}`);
+              }
+            } else {
+              replyLine_(replyToken, `エラーが発生しました。管理者に連絡してください。`);
+            }
+            continue;
+          }
+        }
+        // メールアドレスなし、または候補と一致しない場合は再送を求める
         props.setProperty(`MULTIPLE_MATCH_${userId}`, JSON.stringify({
           candidates: result.candidatesWithInfo,
           timestamp: new Date().getTime()
@@ -487,9 +517,9 @@ function doPost(e) {
               if (idxEmailCol >= 0 && isGmailAddress_(extractedEmail)) {
                 sh.getRange(result.row, idxEmailCol + 1).setValue(extractedEmail);
               }
-              replyLine_(replyToken, `${lastName}先生、登録が完了しました。`);
+              replyLine_(replyToken, `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}${isGmailAddress_(extractedEmail) ? `\n\nメールアドレスを登録しました：${extractedEmail}` : ''}`);
               if (adminLineUserId) {
-                pushLine_(adminLineUserId, `【LINE ID更新】${result.name}さんのLINE IDが更新されました（メール: ${extractedEmail}）`);
+                pushLine_(adminLineUserId, `【LINE登録完了】${result.name}さんのLINE IDが更新され登録が完了しました（メール: ${extractedEmail}）`);
               }
               continue;
             }
@@ -560,6 +590,9 @@ function doPost(e) {
                 replyLine_(replyToken, `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}\n\nメールアドレスを登録しました：${extractedEmail}`);
               } else {
                 replyLine_(replyToken, `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}`);
+              }
+              if (adminLineUserId) {
+                pushLine_(adminLineUserId, `【メール登録完了】${result.name}さんのGmailアドレスが登録されました\nメール: ${extractedEmail}`);
               }
             } else {
               // Gmailアドレスでない場合、Gmailアドレスを要求

@@ -440,8 +440,12 @@ function processInitialShiftRequest_(master, sh, values, header, nextMonthKey, i
   const monthStart = getMonthStartDate_(nextMonthKey);
   if (!monthStart) return;
 
-  // 今日が初回申請依頼日かチェック
-  if (!isReminderDay_(today, monthStart, setting.daysBeforeDeadline)) return;
+  // 3週間前以降かチェック（以降は毎日実行可能、checkTemplateThreeWeeksBefore_内部で重複防止）
+  const targetDate = new Date(monthStart);
+  targetDate.setDate(targetDate.getDate() - setting.daysBeforeDeadline);
+  const todayDateOnly = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const targetDateOnly = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate());
+  if (todayDateOnly < targetDateOnly) return; // まだ3週間前になっていない
 
   // テンプレート確認
   checkTemplateThreeWeeksBefore_(master, sh, values, header, nextMonthKey, idxMonthKey, adminLineUserId);

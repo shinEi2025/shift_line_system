@@ -91,16 +91,16 @@ function doPost(e) {
               // 選択された月でロック解除を実行
               const unlockResult = handleAdminUnlockCommand_(master, `変更依頼 ${selectInfo.teacherName} ${selectedMonth}`);
               if (unlockResult.handled) {
-                replyLine_(replyToken, unlockResult.message);
+                replyLineWithFallback_(replyToken, userId, unlockResult.message);
               } else {
-                replyLine_(replyToken, `エラー：ロック解除に失敗しました。`);
+                replyLineWithFallback_(replyToken, userId, `エラー：ロック解除に失敗しました。`);
               }
               props.deleteProperty(monthSelectKey);
               continue;
             } else {
               // 無効な選択の場合、再度選択肢を提示
               const monthList = selectInfo.availableMonths.map((m, i) => `${i + 1}. ${m}`).join('\n');
-              replyLine_(replyToken, `無効な選択です。以下の月から選択してください：\n${monthList}`);
+              replyLineWithFallback_(replyToken, userId, `無効な選択です。以下の月から選択してください：\n${monthList}`);
               continue;
             }
           } catch (e) {
@@ -112,7 +112,7 @@ function doPost(e) {
         // コマンド形式: "変更依頼: 講師名 月" または "変更依頼: 講師名" または "変更依頼:講師名"
         const unlockResult = handleAdminUnlockCommand_(master, textRaw);
         if (unlockResult.handled) {
-          replyLine_(replyToken, unlockResult.message);
+          replyLineWithFallback_(replyToken, userId, unlockResult.message);
           continue;
         }
         // コマンドとして認識されなかった場合は通常の名前検索に進む（管理者も登録可能にするため）
@@ -133,7 +133,7 @@ function doPost(e) {
             if (confirmation === 'yes') {
               // Gmailアドレスかどうかをチェック
               if (!isGmailAddress_(updateInfo.newEmail)) {
-                replyLine_(replyToken, `※${updateInfo.newEmail}はGmailではないため登録できません。\nGoogleスプレッドシートの編集にはGmailアドレスが必要です。\nGmailアドレスを送信してください。`);
+                replyLineWithFallback_(replyToken, userId, `※${updateInfo.newEmail}はGmailではないため登録できません。\nGoogleスプレッドシートの編集にはGmailアドレスが必要です。\nGmailアドレスを送信してください。`);
                 props.deleteProperty(emailUpdateKey);
                 // EMAIL_REQUEST状態をセット
                 props.setProperty(`EMAIL_REQUEST_${userId}`, JSON.stringify({
@@ -146,19 +146,19 @@ function doPost(e) {
               const teacher = findTeacherByName_(master, updateInfo.name);
               if (teacher) {
                 updateTeacherEmail_(master, teacher.row, updateInfo.newEmail);
-                replyLine_(replyToken, `メールアドレスを変更しました：${updateInfo.newEmail}`);
+                replyLineWithFallback_(replyToken, userId, `メールアドレスを変更しました：${updateInfo.newEmail}`);
               } else {
-                replyLine_(replyToken, `エラー：講師情報が見つかりませんでした。`);
+                replyLineWithFallback_(replyToken, userId, `エラー：講師情報が見つかりませんでした。`);
               }
               props.deleteProperty(emailUpdateKey);
               continue;
             } else if (confirmation === 'no') {
-              replyLine_(replyToken, `メールアドレスの変更をキャンセルしました。`);
+              replyLineWithFallback_(replyToken, userId, `メールアドレスの変更をキャンセルしました。`);
               props.deleteProperty(emailUpdateKey);
               continue;
             } else {
               // 確認待ち状態を維持（「はい」「いいえ」以外のメッセージ）
-              replyLine_(replyToken, `メールアドレスの変更を続けますか？\n「はい」または「いいえ」と送信してください。`);
+              replyLineWithFallback_(replyToken, userId, `メールアドレスの変更を続けますか？\n「はい」または「いいえ」と送信してください。`);
               continue;
             }
           }
@@ -188,25 +188,25 @@ function doPost(e) {
               if (teacher && teacher.row) {
                 updateTeacherEmail_(master, teacher.row, extractedEmail);
                 const lastName = extractLastName_(requestInfo.name);
-                replyLine_(replyToken, `メールアドレスを登録しました：${extractedEmail}\n\n${lastName}先生、登録が完了しました。`);
+                replyLineWithFallback_(replyToken, userId, `メールアドレスを登録しました：${extractedEmail}\n\n${lastName}先生、登録が完了しました。`);
                 // 管理者に通知（メール登録完了）
                 if (adminLineUserId) {
                   pushLine_(adminLineUserId, `【メール登録完了】${requestInfo.name}さんがGmailアドレスを登録しました\nメール: ${extractedEmail}`);
                 }
               } else {
-                replyLine_(replyToken, `エラー：講師情報が見つかりませんでした。`);
+                replyLineWithFallback_(replyToken, userId, `エラー：講師情報が見つかりませんでした。`);
               }
               props.deleteProperty(emailRequestKey);
             } else {
               // Gmailアドレスでない場合、再度促す
               const lastName = extractLastName_(requestInfo.name);
-              replyLine_(replyToken, `${lastName}先生、※送信いただいたメールアドレス（${extractedEmail}）はGmailではないため登録できません。\nGoogleスプレッドシートの編集にはGmailアドレスが必要です。\nGmailアドレスを送信してください。\n例：example@gmail.com`);
+              replyLineWithFallback_(replyToken, userId, `${lastName}先生、※送信いただいたメールアドレス（${extractedEmail}）はGmailではないため登録できません。\nGoogleスプレッドシートの編集にはGmailアドレスが必要です。\nGmailアドレスを送信してください。\n例：example@gmail.com`);
             }
             continue;
           } else {
             // メールアドレスが含まれていない場合、再度促す
             const lastName = extractLastName_(requestInfo.name);
-            replyLine_(replyToken, `${lastName}先生、Gmailアドレスを登録してください。\nGmailアドレスを送信してください。\n例：example@gmail.com`);
+            replyLineWithFallback_(replyToken, userId, `${lastName}先生、Gmailアドレスを登録してください。\nGmailアドレスを送信してください。\n例：example@gmail.com`);
             continue;
           }
         } catch (e) {
@@ -239,22 +239,22 @@ function doPost(e) {
               if (idxEmailCol >= 0) sh.getRange(changeInfo.row, idxEmailCol + 1).setValue(dcEmail);
 
               const lastName = extractLastName_(changeInfo.name);
-              replyLine_(replyToken, `${lastName}先生、LINE IDとGmailアドレスを更新しました。登録完了です。`);
+              replyLineWithFallback_(replyToken, userId, `${lastName}先生、LINE IDとGmailアドレスを更新しました。登録完了です。`);
               if (adminLineUserId) {
                 pushLine_(adminLineUserId, `【機種変更完了】${changeInfo.name}さんのLINE IDとメールアドレスが更新されました。\nメール: ${dcEmail}`);
               }
             } else {
-              replyLine_(replyToken, `エラーが発生しました。管理者に連絡してください。`);
+              replyLineWithFallback_(replyToken, userId, `エラーが発生しました。管理者に連絡してください。`);
             }
             props.deleteProperty(deviceChangeKey);
             continue;
           } else if (dcEmail && !isGmailAddress_(dcEmail)) {
             // Gmail以外 → 再度Gmail要求
-            replyLine_(replyToken, `GmailアドレスのみGoogleスプレッドシートの編集に使えます。\nGmailアドレス（@gmail.com）を送ってください。`);
+            replyLineWithFallback_(replyToken, userId, `GmailアドレスのみGoogleスプレッドシートの編集に使えます。\nGmailアドレス（@gmail.com）を送ってください。`);
             continue;
           } else {
             // メールなし → Gmailを要求
-            replyLine_(replyToken, `Gmailアドレスを送ってください（例：xxx@gmail.com）`);
+            replyLineWithFallback_(replyToken, userId, `Gmailアドレスを送ってください（例：xxx@gmail.com）`);
             continue;
           }
         } catch (e) {
@@ -287,22 +287,22 @@ function doPost(e) {
                 sh.getRange(matched.row, idxLine + 1).setValue(userId);
                 if (idxLinkedAt >= 0) sh.getRange(matched.row, idxLinkedAt + 1).setValue(new Date());
                 const lastName = extractLastName_(matched.name);
-                replyLine_(replyToken, `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}`);
+                replyLineWithFallback_(replyToken, userId, `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}`);
                 if (adminLineUserId) {
                   pushLine_(adminLineUserId, `【LINE登録完了】${matched.name}さんがLINE連携しました\nメール: ${matched.email}`);
                 }
               } else {
-                replyLine_(replyToken, `エラーが発生しました。管理者に連絡してください。`);
+                replyLineWithFallback_(replyToken, userId, `エラーが発生しました。管理者に連絡してください。`);
               }
             } else {
               // 一致なし
-              replyLine_(replyToken, `メールアドレスが一致しません。管理者に連絡してください。`);
+              replyLineWithFallback_(replyToken, userId, `メールアドレスが一致しません。管理者に連絡してください。`);
             }
             props.deleteProperty(multipleMatchKey);
             continue;
           } else {
             // メールなし → Gmailアドレスを要求
-            replyLine_(replyToken, `Gmailアドレスを送ってください（例：xxx@gmail.com）`);
+            replyLineWithFallback_(replyToken, userId, `Gmailアドレスを送ってください（例：xxx@gmail.com）`);
             continue;
           }
         } catch (e) {
@@ -414,11 +414,11 @@ function doPost(e) {
               }
             }
 
-            replyLine_(replyToken, message);
+            replyLineWithFallback_(replyToken, userId, message);
             continue;
           } else {
             // 名前が抽出できない場合はエラーメッセージ
-            replyLine_(replyToken, `お名前（フルネーム）とGmailアドレスの両方を送ってください。\n例：山田太郎 taro@gmail.com`);
+            replyLineWithFallback_(replyToken, userId, `お名前（フルネーム）とGmailアドレスの両方を送ってください。\n例：山田太郎 taro@gmail.com`);
             continue;
           }
         } else {
@@ -438,7 +438,7 @@ function doPost(e) {
             }
             let nameOnlyMsg = `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}`;
             nameOnlyMsg += `\n\nGmailアドレスを登録してください。\nGmailアドレスを送信してください。\n例：example@gmail.com`;
-            replyLine_(replyToken, nameOnlyMsg);
+            replyLineWithFallback_(replyToken, userId, nameOnlyMsg);
             continue;
           }
           // 名前として認識できない場合は無視
@@ -461,12 +461,12 @@ function doPost(e) {
               sh.getRange(matched.row, idxLine + 1).setValue(userId);
               if (idxLinkedAt >= 0) sh.getRange(matched.row, idxLinkedAt + 1).setValue(new Date());
               const lastName = extractLastName_(matched.name);
-              replyLine_(replyToken, `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}`);
+              replyLineWithFallback_(replyToken, userId, `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}`);
               if (adminLineUserId) {
                 pushLine_(adminLineUserId, `【LINE登録完了】${matched.name}さんがLINE連携しました\nメール: ${matched.email}`);
               }
             } else {
-              replyLine_(replyToken, `エラーが発生しました。管理者に連絡してください。`);
+              replyLineWithFallback_(replyToken, userId, `エラーが発生しました。管理者に連絡してください。`);
             }
             continue;
           }
@@ -476,8 +476,9 @@ function doPost(e) {
           candidates: result.candidatesWithInfo,
           timestamp: new Date().getTime()
         }));
-        replyLine_(
+        replyLineWithFallback_(
           replyToken,
+          userId,
           `同じ名前の講師が複数います（${result.candidates.join(' / ')}）\n` +
           `識別のため、登録済みのGmailアドレスを送ってください。`
         );
@@ -500,7 +501,7 @@ function doPost(e) {
             if (idxLine >= 0 && result.row) {
               sh.getRange(result.row, idxLine + 1).setValue(userId);
               if (idxLinkedAt >= 0) sh.getRange(result.row, idxLinkedAt + 1).setValue(new Date());
-              replyLine_(replyToken, `新しいシステムが導入されました。\nアカウントを変更しましたか？再登録しました：${lastName}先生`);
+              replyLineWithFallback_(replyToken, userId, `新しいシステムが導入されました。\nアカウントを変更しましたか？再登録しました：${lastName}先生`);
               continue;
             }
           } else if (!currentEmail) {
@@ -517,7 +518,7 @@ function doPost(e) {
               if (idxEmailCol >= 0 && isGmailAddress_(extractedEmail)) {
                 sh.getRange(result.row, idxEmailCol + 1).setValue(extractedEmail);
               }
-              replyLine_(replyToken, `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}${isGmailAddress_(extractedEmail) ? `\n\nメールアドレスを登録しました：${extractedEmail}` : ''}`);
+              replyLineWithFallback_(replyToken, userId, `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}${isGmailAddress_(extractedEmail) ? `\n\nメールアドレスを登録しました：${extractedEmail}` : ''}`);
               if (adminLineUserId) {
                 pushLine_(adminLineUserId, `【LINE登録完了】${result.name}さんのLINE IDが更新され登録が完了しました（メール: ${extractedEmail}）`);
               }
@@ -525,7 +526,7 @@ function doPost(e) {
             }
           } else {
             // currentEmail あり + 不一致 → 教室に連絡を促す
-            replyLine_(replyToken, `この氏名は別のLINEと紐付いています：${result.name}\n教室まで連絡してください。`);
+            replyLineWithFallback_(replyToken, userId, `この氏名は別のLINEと紐付いています：${result.name}\n教室まで連絡してください。`);
             continue;
           }
         } else {
@@ -540,17 +541,17 @@ function doPost(e) {
             if (adminLineUserId) {
               pushLine_(adminLineUserId, `【要確認】${result.name}さんが名前だけを送信しました（別のLINE IDが登録済み、メール未登録）。機種変更の可能性あり。`);
             }
-            replyLine_(replyToken, `${lastName}先生、確認のためGmailアドレスを送ってください（例：xxx@gmail.com）`);
+            replyLineWithFallback_(replyToken, userId, `${lastName}先生、確認のためGmailアドレスを送ってください（例：xxx@gmail.com）`);
             continue;
           } else {
             // currentEmail あり → Gmailアドレスを送るよう案内
-            replyLine_(replyToken, `この氏名は別のLINEと紐付いています：${result.name}\n機種変更の場合は登録済みのGmailアドレスを送ってください。`);
+            replyLineWithFallback_(replyToken, userId, `この氏名は別のLINEと紐付いています：${result.name}\n機種変更の場合は登録済みのGmailアドレスを送ってください。`);
             continue;
           }
         }
 
         // フォールバック（通常は到達しない）
-        replyLine_(replyToken, `この氏名は別のLINEと紐付いています：${result.name}\n教室まで連絡してください。`);
+        replyLineWithFallback_(replyToken, userId, `この氏名は別のLINEと紐付いています：${result.name}\n教室まで連絡してください。`);
         continue;
       }
 
@@ -564,7 +565,7 @@ function doPost(e) {
           if (currentEmail && currentEmail === extractedEmail) {
             // LINE IDもメールアドレスも完全一致 → 既に登録済み
             const lastName = extractLastName_(result.name);
-            replyLine_(replyToken, `既に登録済みです：${lastName}先生`);
+            replyLineWithFallback_(replyToken, userId, `既に登録済みです：${lastName}先生`);
             continue;
           } else if (currentEmail && currentEmail !== extractedEmail) {
             // メールアドレスが違う場合、確認を求める
@@ -575,8 +576,9 @@ function doPost(e) {
               newEmail: extractedEmail,
               timestamp: new Date().getTime()
             }));
-            replyLine_(
+            replyLineWithFallback_(
               replyToken,
+              userId,
               `登録されているメールアドレスと違います。\n現在: ${currentEmail}\n送信: ${extractedEmail}\n\n変更しますか？「はい」または「いいえ」と送信してください。`
             );
             continue;
@@ -587,9 +589,9 @@ function doPost(e) {
               // Gmailアドレスの場合のみ登録
               if (result.row) {
                 updateTeacherEmail_(master, result.row, extractedEmail);
-                replyLine_(replyToken, `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}\n\nメールアドレスを登録しました：${extractedEmail}`);
+                replyLineWithFallback_(replyToken, userId, `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}\n\nメールアドレスを登録しました：${extractedEmail}`);
               } else {
-                replyLine_(replyToken, `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}`);
+                replyLineWithFallback_(replyToken, userId, `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}`);
               }
               if (adminLineUserId) {
                 pushLine_(adminLineUserId, `【メール登録完了】${result.name}さんのGmailアドレスが登録されました\nメール: ${extractedEmail}`);
@@ -600,13 +602,13 @@ function doPost(e) {
                 name: result.name,
                 timestamp: new Date().getTime()
               }));
-              replyLine_(replyToken, `${lastName}先生、登録済みですがGmailアドレスがまだ登録されていません。\n\n※送信いただいたメールアドレス（${extractedEmail}）はGmailではないため登録できません。\nGoogleスプレッドシートの編集にはGmailアドレスが必要です。\nGmailアドレスを送信してください。\n例：example@gmail.com`);
+              replyLineWithFallback_(replyToken, userId, `${lastName}先生、登録済みですがGmailアドレスがまだ登録されていません。\n\n※送信いただいたメールアドレス（${extractedEmail}）はGmailではないため登録できません。\nGoogleスプレッドシートの編集にはGmailアドレスが必要です。\nGmailアドレスを送信してください。\n例：example@gmail.com`);
             }
             continue;
           }
           // フォールバック：条件に一致しない場合（通常は到達しない）
           const lastName2 = extractLastName_(result.name);
-          replyLine_(replyToken, `既に登録済みです：${lastName2}先生`);
+          replyLineWithFallback_(replyToken, userId, `既に登録済みです：${lastName2}先生`);
           continue;
         } else {
           // メールアドレスが含まれていない場合
@@ -617,12 +619,12 @@ function doPost(e) {
               name: result.name,
               timestamp: new Date().getTime()
             }));
-            replyLine_(replyToken,
+            replyLineWithFallback_(replyToken, userId,
               `${lastName}先生、登録済みですがGmailアドレスがまだ登録されていません。\n` +
               `Gmailアドレスを送ってください（例：xxx@gmail.com）`
             );
           } else {
-            replyLine_(replyToken, `既に登録済みです：${lastName}先生`);
+            replyLineWithFallback_(replyToken, userId, `既に登録済みです：${lastName}先生`);
           }
           continue;
         }
@@ -637,7 +639,7 @@ function doPost(e) {
         if (extractedEmail && isValidEmail_(extractedEmail)) {
           if (currentEmail && currentEmail === extractedEmail) {
             // 初回LINE登録完了（メールアドレスは既に登録済み）
-            replyLine_(replyToken, `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}`);
+            replyLineWithFallback_(replyToken, userId, `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}`);
             // 管理者に通知
             if (adminLineUserId) {
               pushLine_(adminLineUserId, `【LINE登録完了】${result.name}さんがLINE連携しました\nメール: ${currentEmail}`);
@@ -652,8 +654,9 @@ function doPost(e) {
               newEmail: extractedEmail,
               timestamp: new Date().getTime()
             }));
-            replyLine_(
+            replyLineWithFallback_(
               replyToken,
+              userId,
               `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}\n\n登録されているメールアドレスと違います。\n現在: ${currentEmail}\n送信: ${extractedEmail}\n\n変更しますか？「はい」または「いいえ」と送信してください。`
             );
             // 管理者に通知
@@ -668,13 +671,13 @@ function doPost(e) {
               // Gmailアドレスの場合、登録
               if (result.row) {
                 updateTeacherEmail_(master, result.row, extractedEmail);
-                replyLine_(replyToken, `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}\n\nメールアドレスを登録しました：${extractedEmail}`);
+                replyLineWithFallback_(replyToken, userId, `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}\n\nメールアドレスを登録しました：${extractedEmail}`);
                 // 管理者に通知
                 if (adminLineUserId) {
                   pushLine_(adminLineUserId, `【LINE登録完了】${result.name}さんがLINE連携しました\nメール: ${extractedEmail}`);
                 }
               } else {
-                replyLine_(replyToken, `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}`);
+                replyLineWithFallback_(replyToken, userId, `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}`);
                 // 管理者に通知
                 if (adminLineUserId) {
                   pushLine_(adminLineUserId, `【LINE登録完了】${result.name}さんがLINE連携しました（メール未登録）`);
@@ -687,7 +690,7 @@ function doPost(e) {
                 name: result.name,
                 timestamp: new Date().getTime()
               }));
-              replyLine_(replyToken, `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}\n\n※送信いただいたメールアドレス（${extractedEmail}）はGmailではないため登録できません。\nGoogleスプレッドシートの編集にはGmailアドレスが必要です。\nGmailアドレスを送信してください。\n例：example@gmail.com`);
+              replyLineWithFallback_(replyToken, userId, `登録OK：${lastName}先生\n今後はこのLINEでシフト連絡します。${MESSAGE_SPREADSHEET_APP}\n\n※送信いただいたメールアドレス（${extractedEmail}）はGmailではないため登録できません。\nGoogleスプレッドシートの編集にはGmailアドレスが必要です。\nGmailアドレスを送信してください。\n例：example@gmail.com`);
               // 管理者に通知
               if (adminLineUserId) {
                 pushLine_(adminLineUserId, `【LINE登録完了】${result.name}さんがLINE連携しました（メール未登録：${extractedEmail}はGmail以外）`);
@@ -717,7 +720,7 @@ function doPost(e) {
             pushLine_(adminLineUserId, `【LINE登録完了】${result.name}さんがLINE連携しました\nメール: ${currentEmail}`);
           }
         }
-        replyLine_(replyToken, message);
+        replyLineWithFallback_(replyToken, userId, message);
         continue;
       }
 
